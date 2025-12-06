@@ -1,8 +1,0 @@
-fastapi
-uvicorn
-pydantic
-python-dotenv
-supabase
-sentence-transformers
-zhipuai
-PyJWT>=2.10.1  <-- 加上这一行，强制升级
