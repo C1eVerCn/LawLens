@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 from sentence_transformers import SentenceTransformer
 from zhipuai import ZhipuAI
-from typing import List, Optional # 新增 import
+from typing import List, Optional
 
 # 1. 加载环境变量
 load_dotenv()
@@ -20,11 +20,25 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 zhipu_client = ZhipuAI(api_key=ZHIPU_API_KEY)
 
 print("⏳ 正在加载 AI 模型 (第一次启动会稍慢)...")
-# 这里复用你本地已经下载好的模型
 embed_model = SentenceTransformer('shibing624/text2vec-base-chinese')
 print("✅ 模型加载完毕！")
 
-# --- 新增：数据模型 ---
+# 3. 创建 API 服务
+app = FastAPI()
+
+# 允许前端跨域访问
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- 数据模型 ---
+class AnalyzeRequest(BaseModel):
+    text: str
+
 class DocumentSave(BaseModel):
     title: str
     content: str
@@ -35,26 +49,12 @@ class DocumentHistory(BaseModel):
     content: str
     created_at: str
 
-# 3. 创建 API 服务
-app = FastAPI()
-
-# 允许前端跨域访问 (非常重要！)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"], # 允许 Next.js 前端访问
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-class AnalyzeRequest(BaseModel):
-    text: str
+# --- 核心逻辑函数 ---
 
 def get_relevant_laws(query: str):
     """ 去 Supabase 搜索相关的法律条款 """
     query_vector = embed_model.encode(query).tolist()
     
-    # 调用数据库函数
     response = supabase.rpc("match_documents", {
         "query_embedding": query_vector,
         "match_threshold": 0.4, 
@@ -63,26 +63,13 @@ def get_relevant_laws(query: str):
     
     return response.data
 
-# --- 新增：数据模型 ---
-class DocumentSave(BaseModel):
-    title: str
-    content: str
-
-class DocumentHistory(BaseModel):
-    id: int
-    title: str
-    content: str
-    created_at: str
-
-# --- 新增：版本管理 API ---
+# --- API 接口 ---
 
 @app.post("/api/save")
 async def save_document(doc: DocumentSave):
     """ 保存文书到 Supabase """
     print(f"💾 正在保存: {doc.title}")
     try:
-        # 简单实现：每次保存都作为一条新记录（类似版本快照）
-        # 实际生产中可能需要区分 "update" 和 "new version"
         data = {
             "title": doc.title,
             "content": doc.content,
@@ -97,8 +84,7 @@ async def save_document(doc: DocumentSave):
 async def get_history():
     """ 获取所有历史文书 """
     try:
-        # 按时间倒序查前 10 条
-        response = supabase.table("documents").select("*").order("created_at", desc=True).limit(10).execute()
+        response = supabase.table("documents").select("*").order("created_at", desc=True).limit(20).execute()
         return response.data
     except Exception as e:
         print(f"❌ 获取历史失败: {e}")
@@ -120,13 +106,20 @@ async def analyze(request: AnalyzeRequest):
             for doc in relevant_docs
         ])
 
-    # B. 组装提示词
+    # B. 组装提示词 (核心修改：要求 AI 生成 3 个建议问题)
     system_prompt = """
-    你是一位专业的中国法律顾问。请根据下面提供的【法律法规依据】来分析用户的案情。
-    要求：
-    1. 引用具体的法律条款。
-    2. 语气专业、客观。
-    3. 输出格式要清晰，分点回答。
+    你是一位专业的中国法律顾问。请根据提供的【法律法规依据】分析用户的案情。
+    
+    输出要求：
+    1. 先输出分析结果，引用法条，分点作答。
+    2. 分析结束后，必须在最后一行单独输出特殊分隔符 "|||"。
+    3. 在分隔符之后，列出 3 个用户可能想进一步了解的相关法律问题（简短，不超过 20 字）。
+    4. 格式示例：
+       分析内容......
+       |||
+       如何收集书面证据？
+       诉讼时效是多久？
+       能否要求精神损害赔偿？
     """
     
     user_prompt = f"""
@@ -146,14 +139,27 @@ async def analyze(request: AnalyzeRequest):
                 {"role": "user", "content": user_prompt},
             ],
         )
-        # 获取回答
-        ai_reply = response.choices[0].message.content
-        return {"result": ai_reply}
+        full_content = response.choices[0].message.content
+        
+        # D. 解析结果：分离“分析结果”和“建议问题”
+        if "|||" in full_content:
+            parts = full_content.split("|||")
+            result_text = parts[0].strip()
+            # 解析建议问题：按行分割，去空行，取前3个
+            suggestions_raw = parts[1].strip().split("\n")
+            suggestions = [s.strip() for s in suggestions_raw if s.strip()][:3]
+        else:
+            result_text = full_content
+            suggestions = []
+
+        return {
+            "result": result_text,
+            "suggestions": suggestions  # 返回给前端的新字段
+        }
 
     except Exception as e:
         print(f"❌ 出错: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    # 在 8000 端口启动服务
     uvicorn.run(app, host="0.0.0.0", port=8000)

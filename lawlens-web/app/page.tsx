@@ -14,6 +14,10 @@ import { Card } from '@/components/ui/card'
 import { TypewriterEffect } from '@/components/ui/typewriter-effect'
 import { LEGAL_TEMPLATES } from '@/lib/templates'
 
+// 🌍 定义后端 API 地址
+// 优先使用环境变量 (部署后生效)，如果没有则使用本地调试地址
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
+
 // 定义历史记录的数据结构
 interface HistoryItem {
   id: number
@@ -26,6 +30,7 @@ export default function Home() {
   const [content, setContent] = useState('')
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [aiResult, setAiResult] = useState('')
+  const [suggestions, setSuggestions] = useState<string[]>([]) 
   
   // 历史记录相关状态
   const [showHistory, setShowHistory] = useState(false)
@@ -36,7 +41,8 @@ export default function Home() {
   const fetchHistory = async () => {
     setIsLoadingHistory(true)
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/history')
+      // ✅ 使用配置好的 API 地址
+      const res = await fetch(`${API_BASE_URL}/api/history`)
       if (res.ok) {
         const data = await res.json()
         setHistoryList(data)
@@ -55,19 +61,21 @@ export default function Home() {
     }
   }, [showHistory])
 
-  // 2. 核心：分析 + 自动保存
+  // 2. 核心：分析 + 自动保存 + 获取动态建议
   const handleAnalyze = async () => {
     if (!content.trim()) return
     setIsAnalyzing(true)
     setAiResult('') 
+    setSuggestions([]) 
 
     try {
-      // 步骤 A: 自动保存 (Fire and Forget，不需要等它完成再分析)
+      // 步骤 A: 自动保存
       saveDocument()
 
       // 步骤 B: 发送分析请求
       console.log("🚀 开始发送请求给后端...")
-      const response = await fetch('http://127.0.0.1:8000/api/analyze', {
+      // ✅ 使用配置好的 API 地址
+      const response = await fetch(`${API_BASE_URL}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: content }),
@@ -76,7 +84,11 @@ export default function Home() {
       if (!response.ok) throw new Error(`服务器错误: ${response.status}`)
 
       const data = await response.json()
+      console.log("✅ 收到 AI 回复")
+      
+      // 步骤 C: 更新 UI
       setAiResult(data.result)
+      setSuggestions(data.suggestions || []) 
 
     } catch (error) {
       console.error("❌ 请求失败:", error)
@@ -89,9 +101,9 @@ export default function Home() {
   // 保存文档辅助函数
   const saveDocument = async () => {
     try {
-      // 取前20个字作为标题
       const title = content.slice(0, 20) + (content.length > 20 ? '...' : '')
-      await fetch('http://127.0.0.1:8000/api/save', {
+      // ✅ 使用配置好的 API 地址
+      await fetch(`${API_BASE_URL}/api/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, content }),
@@ -111,7 +123,7 @@ export default function Home() {
   // 加载历史文档到编辑器
   const loadHistoryItem = (item: HistoryItem) => {
     setContent(item.content)
-    setShowHistory(false) // 关闭侧边栏
+    setShowHistory(false)
   }
 
   return (
@@ -130,7 +142,7 @@ export default function Home() {
             <Button 
               variant="ghost" 
               size="sm" 
-              onClick={() => setShowHistory(true)} // 👈 点击打开历史侧边栏
+              onClick={() => setShowHistory(true)}
               className="text-slate-500 hover:text-slate-900"
             >
               <History className="w-4 h-4 mr-2"/> 历史记录
@@ -141,9 +153,7 @@ export default function Home() {
               size="sm" 
               className="text-slate-500 hover:text-slate-900"
               onClick={() => {
-                // 如果没有内容，就别导出
                 if (!content) return; 
-                // 取前10个字做文件名，或者默认“法律文书”
                 const fileName = (content.slice(0, 10).replace(/\n/g, '') || '法律文书') + '.docx'
                 exportToWord(content, fileName)
             }}
@@ -222,74 +232,79 @@ export default function Home() {
           </Card>
         </motion.div>
 
-      {/* 右侧：AI 分析面板 */}
-      <motion.div 
-        initial={{ opacity: 0, x: 20 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
-        className="lg:col-span-4"
-      >
-        {/* 👇 关键修改：把 h-full 改成了 h-[700px] */}
-        <Card className="h-[700px] border-0 shadow-xl shadow-slate-200/50 bg-white ring-1 ring-slate-100 flex flex-col relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full blur-3xl -z-10 opacity-50"></div>
+        {/* 右侧：AI 分析面板 */}
+        <motion.div 
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+          className="lg:col-span-4"
+        >
+          <Card className="h-[700px] border-0 shadow-xl shadow-slate-200/50 bg-white ring-1 ring-slate-100 flex flex-col relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full blur-3xl -z-10 opacity-50"></div>
 
-          <div className="p-5 border-b border-slate-100 bg-white/50 backdrop-blur-sm">
-            <h2 className="font-serif font-semibold text-lg flex items-center gap-2 text-slate-800">
-              <Sparkles className="w-4 h-4 text-blue-600" />
-              AI 法律顾问
-            </h2>
-          </div>
-
-          {/* flex-1 和 overflow-y-auto 配合父级固定高度，会让长文本在这里面滚动 */}
-          <div className="flex-1 p-5 overflow-y-auto bg-slate-50/30">
-            <AnimatePresence mode="wait">
-              {aiResult ? (
-                <motion.div
-                  key="result"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="prose prose-sm prose-slate bg-white p-4 rounded-xl border border-blue-100 shadow-sm"
-                >
-                  <TypewriterEffect text={aiResult} />
-                </motion.div>
-             ) : (
-                <motion.div 
-                  key="empty"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="h-full flex flex-col items-center justify-center text-center text-slate-400 space-y-4"
-                >
-                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm border border-slate-100">
-                    <Scale className="w-8 h-8 text-slate-200" />
-                  </div>
-                  <div className="max-w-[200px]">
-                    <p className="text-sm">在左侧输入案情，点击分析，我将为您检索法条并提供建议。</p>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-    
-          {aiResult && (
-            <div className="p-4 border-t border-slate-100 bg-white">
-              <p className="text-xs text-slate-400 mb-2">猜你想问：</p>
-              <div className="flex flex-col gap-2">
-                <button className="text-xs text-left px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded-md text-slate-600 transition-colors flex justify-between items-center group">
-                  如何收集相关证据？
-                  <ChevronRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity"/>
-                </button>
-              </div>
+            <div className="p-5 border-b border-slate-100 bg-white/50 backdrop-blur-sm">
+              <h2 className="font-serif font-semibold text-lg flex items-center gap-2 text-slate-800">
+                <Sparkles className="w-4 h-4 text-blue-600" />
+                AI 法律顾问
+              </h2>
             </div>
-          )}
-        </Card>
-      </motion.div>
+
+            <div className="flex-1 p-5 overflow-y-auto bg-slate-50/30">
+              <AnimatePresence mode="wait">
+                {aiResult ? (
+                  <motion.div
+                    key="result"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="prose prose-sm prose-slate bg-white p-4 rounded-xl border border-blue-100 shadow-sm"
+                  >
+                    <TypewriterEffect text={aiResult} />
+                  </motion.div>
+              ) : (
+                  <motion.div 
+                    key="empty"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="h-full flex flex-col items-center justify-center text-center text-slate-400 space-y-4"
+                  >
+                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm border border-slate-100">
+                      <Scale className="w-8 h-8 text-slate-200" />
+                    </div>
+                    <div className="max-w-[200px]">
+                      <p className="text-sm">在左侧输入案情，点击分析，我将为您检索法条并提供建议。</p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+      
+            {/* 动态渲染建议列表 */}
+            {aiResult && suggestions.length > 0 && (
+              <div className="p-4 border-t border-slate-100 bg-white">
+                <p className="text-xs text-slate-400 mb-2">猜你想问：</p>
+                <div className="flex flex-col gap-2">
+                  {suggestions.map((question, index) => (
+                    <button 
+                      key={index}
+                      // 点击后把问题追加到内容里
+                      onClick={() => setContent(content + "\n\n【追问】" + question)}
+                      className="text-xs text-left px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded-md text-slate-600 transition-colors flex justify-between items-center group"
+                    >
+                      {question}
+                      <ChevronRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity"/>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Card>
+        </motion.div>
       </div>
 
-      {/* 3. 历史记录侧边栏 (Slide-over) */}
+      {/* 3. 历史记录侧边栏 */}
       <AnimatePresence>
         {showHistory && (
           <>
-            {/* 遮罩层 */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -297,7 +312,6 @@ export default function Home() {
               onClick={() => setShowHistory(false)}
               className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[60]"
             />
-            {/* 侧边栏内容 */}
             <motion.div
               initial={{ x: '100%' }}
               animate={{ x: 0 }}
