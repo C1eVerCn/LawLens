@@ -4,5 +4,5 @@ pydantic
 python-dotenv
 supabase
 sentence-transformers
-zhipuai
-PyJWT>=2.10.1  
+zhipuai>=2.1.0
+PyJWT>=2.10.1
