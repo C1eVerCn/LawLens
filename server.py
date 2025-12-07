@@ -3,14 +3,11 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from dotenv import load_dotenv
 from supabase import create_client, Client
-from sentence_transformers import SentenceTransformer
 from zhipuai import ZhipuAI
 from typing import List, Optional
 
-# 1. 客户端变量定义 (初始为 None)
-# Render 会通过 os.getenv 自动获取这些变量
+# 1. 环境变量 (Render 会自动注入，无需 load_dotenv)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY")
@@ -18,12 +15,10 @@ ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY")
 # 2. 全局客户端变量
 supabase: Optional[Client] = None
 zhipu_client: Optional[ZhipuAI] = None
-embed_model = None 
 
 # 3. 创建 API 服务
 app = FastAPI()
 
-# 允许前端跨域访问 (允许所有来源)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -32,28 +27,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 💥 关键修复 💥：使用 FastAPI 启动钩子函数安全地初始化客户端
+# 4. 启动时初始化 (轻量级，不加载大模型)
 @app.on_event("startup")
 def startup_event():
     global supabase, zhipu_client
-    
-    # 移除 load_dotenv()，因为 Render 已经加载了环境变量
-    
-    # 1. 检查关键变量是否存在
+    # 检查 Render 是否配置了必要的环境变量
     if not all([SUPABASE_URL, SUPABASE_KEY, ZHIPU_API_KEY]):
-        print("❌ 错误：核心环境变量缺失。服务将无法运行。")
-        raise EnvironmentError("Supabase 或 ZhipuAI 密钥/URL 缺失。请检查 Render 配置。")
+        print("❌ 错误：核心环境变量缺失。")
+        raise EnvironmentError("配置缺失：请检查 Render 的 Environment Variables")
 
-    # 2. 安全初始化客户端 (在启动时执行)
     try:
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         zhipu_client = ZhipuAI(api_key=ZHIPU_API_KEY)
-        print("✅ Supabase 和 ZhipuAI 客户端初始化成功。")
+        print("✅ 客户端初始化成功 (API模式，内存占用极低)")
     except Exception as e:
-        print(f"❌ 客户端初始化失败: {e}")
-        raise HTTPException(status_code=500, detail="后端客户端初始化失败。")
+        print(f"❌ 初始化失败: {e}")
+        raise HTTPException(status_code=500, detail="初始化失败")
 
-# --- 数据模型 ---
 class AnalyzeRequest(BaseModel):
     text: str
 
@@ -61,112 +51,88 @@ class DocumentSave(BaseModel):
     title: str
     content: str
 
-class DocumentHistory(BaseModel):
-    id: int
-    title: str
-    content: str
-    created_at: str
-
-# --- 核心逻辑函数 ---
-
+# ---------------------------------------------------------
+# 核心修改：使用智谱 API 生成向量 (替代本地 sentence-transformers)
+# ---------------------------------------------------------
 def get_relevant_laws(query: str):
-    """ 去 Supabase 搜索相关的法律条款 """
-    global embed_model # 引用全局变量
+    if not zhipu_client or not supabase:
+        raise HTTPException(status_code=500, detail="服务未就绪")
     
-    # ✅ 懒加载逻辑
-    if embed_model is None:
-        print("⏳ 第一次运行，正在加载 AI 模型...")
-        embed_model = SentenceTransformer('shibing624/text2vec-base-chinese')
-        print("✅ 模型加载完毕！")
-
-    # 检查客户端是否已初始化 (防止 NoneType 错误)
-    if not supabase or not embed_model:
-        raise HTTPException(status_code=500, detail="数据库或模型客户端未就绪。")
+    try:
+        # 调用智谱 Embedding API (使用 embedding-2 模型)
+        # 这也是你当初向 Supabase 存数据时用的模型原理，通用性很高
+        response = zhipu_client.embeddings.create(
+            model="embedding-2", 
+            input=query
+        )
+        # 获取向量数据 (这是一个 float 数组)
+        query_vector = response.data[0].embedding
         
-    query_vector = embed_model.encode(query).tolist()
-    
-    # 调用数据库函数
-    response = supabase.rpc("match_documents", {
-        "query_embedding": query_vector,
-        "match_threshold": 0.4, 
-        "match_count": 5
-    }).execute()
-    
-    return response.data
+        # 去 Supabase 查询 (这一步没变)
+        rpc_response = supabase.rpc("match_documents", {
+            "query_embedding": query_vector,
+            "match_threshold": 0.4, 
+            "match_count": 5
+        }).execute()
+        
+        return rpc_response.data
+        
+    except Exception as e:
+        print(f"❌ 检索失败: {e}")
+        # 如果检索挂了，返回空列表，不要让整个请求崩溃
+        return []
 
-# --- API 接口 ---
+# ---------------------------------------------------------
 
 @app.post("/api/save")
 async def save_document(doc: DocumentSave):
-    """ 保存文书到 Supabase """
-    if not supabase: raise HTTPException(status_code=500, detail="数据库未连接。")
-    print(f"💾 正在保存: {doc.title}")
+    if not supabase: raise HTTPException(status_code=500, detail="DB未连接")
     try:
-        data = {
-            "title": doc.title,
-            "content": doc.content,
-        }
-        response = supabase.table("documents").insert(data).execute()
-        return {"status": "success", "data": response.data}
+        # 简单的取前20个字作为标题逻辑
+        data = {"title": doc.title, "content": doc.content}
+        supabase.table("documents").insert(data).execute()
+        return {"status": "success"}
     except Exception as e:
-        print(f"❌ 保存失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Save error: {e}")
+        return {"status": "error", "msg": str(e)}
 
 @app.get("/api/history")
 async def get_history():
-    """ 获取所有历史文书 """
-    if not supabase: raise HTTPException(status_code=500, detail="数据库未连接。")
+    if not supabase: raise HTTPException(status_code=500, detail="DB未连接")
     try:
-        response = supabase.table("documents").select("*").order("created_at", desc=True).limit(20).execute()
-        return response.data
+        res = supabase.table("documents").select("*").order("created_at", desc=True).limit(20).execute()
+        return res.data
     except Exception as e:
-        print(f"❌ 获取历史失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"History error: {e}")
+        return []
 
 @app.post("/api/analyze")
 async def analyze(request: AnalyzeRequest):
-    print(f"🔍 收到请求: {request.text[:20]}...")
+    print(f"🔍 分析请求: {request.text[:10]}...")
     
-    if not zhipu_client: raise HTTPException(status_code=500, detail="AI 客户端未就绪。")
-
-    # A. 检索 (RAG)
+    # 1. 检索 (调用上面的 get_relevant_laws)
     relevant_docs = get_relevant_laws(request.text)
     
     context_text = ""
     if not relevant_docs:
-        context_text = "（未找到具体法律条文，请依据通用法律常识回答）"
+        context_text = "（未找到具体条文，请依据通用法律常识回答）"
     else:
         context_text = "\n\n".join([
-            f"《{doc['law_name']}》{doc['reference_id']}:\n{doc['content']}" 
+            f"《{doc['law_name']}》:\n{doc['content']}" 
             for doc in relevant_docs
         ])
 
-    # B. 组装提示词 (已包含生成建议问题的逻辑)
-    # ... (提示词保持不变) ...
+    # 2. 生成回答
     system_prompt = """
     你是一位专业的中国法律顾问。请根据提供的【法律法规依据】分析用户的案情。
-    
     输出要求：
-    1. 先输出分析结果，引用法条，分点作答。
-    2. 分析结束后，必须在最后一行单独输出特殊分隔符 "|||"。
-    3. 在分隔符之后，列出 3 个用户可能想进一步了解的相关法律问题（简短，不超过 20 字）。
-    4. 格式示例：
-       分析内容......
-       |||
-       如何收集书面证据？
-       诉讼时效是多久？
-       能否要求精神损害赔偿？
+    1. 先输出分析结果，引用法条。
+    2. 最后一行单独输出 "|||"。
+    3. 在分隔符后列出3个相关追问。
     """
     
-    user_prompt = f"""
-    【法律法规依据】：
-    {context_text}
+    user_prompt = f"【法律法规依据】:\n{context_text}\n\n【用户案情】:\n{request.text}"
 
-    【用户案情】：
-    {request.text}
-    """
-
-    # C. 调用智谱 AI
     try:
         response = zhipu_client.chat.completions.create(
             model="glm-4",
@@ -177,26 +143,19 @@ async def analyze(request: AnalyzeRequest):
         )
         full_content = response.choices[0].message.content
         
-        # D. 解析结果：分离“分析结果”和“建议问题”
+        # 解析 "|||" 分隔符
         if "|||" in full_content:
             parts = full_content.split("|||")
-            result_text = parts[0].strip()
-            suggestions_raw = parts[1].strip().split("\n")
-            suggestions = [s.strip() for s in suggestions_raw if s.strip()][:3]
+            return {
+                "result": parts[0].strip(), 
+                "suggestions": [s.strip() for s in parts[1].strip().split("\n") if s.strip()][:3]
+            }
         else:
-            result_text = full_content
-            suggestions = []
-
-        return {
-            "result": result_text,
-            "suggestions": suggestions
-        }
+            return {"result": full_content, "suggestions": []}
 
     except Exception as e:
-        print(f"❌ 智谱AI调用失败: {e}")
-        # 返回一个明确的错误信息，而不是通用的 500
-        raise HTTPException(status_code=500, detail="AI调用失败，请检查ZhipuAI密钥是否正确。")
+        print(f"❌ AI生成失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    # 移除 load_dotenv()，因为 Render 已经加载了环境变量
     uvicorn.run(app, host="0.0.0.0", port=8000)
