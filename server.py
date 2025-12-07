@@ -9,31 +9,49 @@ from sentence_transformers import SentenceTransformer
 from zhipuai import ZhipuAI
 from typing import List, Optional
 
-# 1. 加载环境变量
-load_dotenv()
+# 1. 客户端变量定义 (初始为 None)
+# Render 会通过 os.getenv 自动获取这些变量
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY")
 
-# 2. 初始化客户端
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-zhipu_client = ZhipuAI(api_key=ZHIPU_API_KEY)
-
-# 🚀 OOM 修复：将模型初始化为 None，实现懒加载
+# 2. 全局客户端变量
+supabase: Optional[Client] = None
+zhipu_client: Optional[ZhipuAI] = None
 embed_model = None 
 
 # 3. 创建 API 服务
 app = FastAPI()
 
-# 允许前端跨域访问 (更新：允许所有来源访问)
+# 允许前端跨域访问 (允许所有来源)
 app.add_middleware(
     CORSMiddleware,
-    # 💥 将 allow_origins 改为 ["*"] 💥
     allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 💥 关键修复 💥：使用 FastAPI 启动钩子函数安全地初始化客户端
+@app.on_event("startup")
+def startup_event():
+    global supabase, zhipu_client
+    
+    # 移除 load_dotenv()，因为 Render 已经加载了环境变量
+    
+    # 1. 检查关键变量是否存在
+    if not all([SUPABASE_URL, SUPABASE_KEY, ZHIPU_API_KEY]):
+        print("❌ 错误：核心环境变量缺失。服务将无法运行。")
+        raise EnvironmentError("Supabase 或 ZhipuAI 密钥/URL 缺失。请检查 Render 配置。")
+
+    # 2. 安全初始化客户端 (在启动时执行)
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        zhipu_client = ZhipuAI(api_key=ZHIPU_API_KEY)
+        print("✅ Supabase 和 ZhipuAI 客户端初始化成功。")
+    except Exception as e:
+        print(f"❌ 客户端初始化失败: {e}")
+        raise HTTPException(status_code=500, detail="后端客户端初始化失败。")
 
 # --- 数据模型 ---
 class AnalyzeRequest(BaseModel):
@@ -55,13 +73,16 @@ def get_relevant_laws(query: str):
     """ 去 Supabase 搜索相关的法律条款 """
     global embed_model # 引用全局变量
     
-    # ✅ 懒加载逻辑：只有第一次调用时才加载模型 (解决 OOM)
+    # ✅ 懒加载逻辑
     if embed_model is None:
         print("⏳ 第一次运行，正在加载 AI 模型...")
-        # 这一步将只在第一次 API 请求时发生
         embed_model = SentenceTransformer('shibing624/text2vec-base-chinese')
         print("✅ 模型加载完毕！")
 
+    # 检查客户端是否已初始化 (防止 NoneType 错误)
+    if not supabase or not embed_model:
+        raise HTTPException(status_code=500, detail="数据库或模型客户端未就绪。")
+        
     query_vector = embed_model.encode(query).tolist()
     
     # 调用数据库函数
@@ -78,6 +99,7 @@ def get_relevant_laws(query: str):
 @app.post("/api/save")
 async def save_document(doc: DocumentSave):
     """ 保存文书到 Supabase """
+    if not supabase: raise HTTPException(status_code=500, detail="数据库未连接。")
     print(f"💾 正在保存: {doc.title}")
     try:
         data = {
@@ -93,6 +115,7 @@ async def save_document(doc: DocumentSave):
 @app.get("/api/history")
 async def get_history():
     """ 获取所有历史文书 """
+    if not supabase: raise HTTPException(status_code=500, detail="数据库未连接。")
     try:
         response = supabase.table("documents").select("*").order("created_at", desc=True).limit(20).execute()
         return response.data
@@ -104,6 +127,8 @@ async def get_history():
 async def analyze(request: AnalyzeRequest):
     print(f"🔍 收到请求: {request.text[:20]}...")
     
+    if not zhipu_client: raise HTTPException(status_code=500, detail="AI 客户端未就绪。")
+
     # A. 检索 (RAG)
     relevant_docs = get_relevant_laws(request.text)
     
@@ -117,6 +142,7 @@ async def analyze(request: AnalyzeRequest):
         ])
 
     # B. 组装提示词 (已包含生成建议问题的逻辑)
+    # ... (提示词保持不变) ...
     system_prompt = """
     你是一位专业的中国法律顾问。请根据提供的【法律法规依据】分析用户的案情。
     
@@ -155,7 +181,6 @@ async def analyze(request: AnalyzeRequest):
         if "|||" in full_content:
             parts = full_content.split("|||")
             result_text = parts[0].strip()
-            # 解析建议问题：按行分割，去空行，取前3个
             suggestions_raw = parts[1].strip().split("\n")
             suggestions = [s.strip() for s in suggestions_raw if s.strip()][:3]
         else:
@@ -164,12 +189,14 @@ async def analyze(request: AnalyzeRequest):
 
         return {
             "result": result_text,
-            "suggestions": suggestions  # 返回给前端的新字段
+            "suggestions": suggestions
         }
 
     except Exception as e:
-        print(f"❌ 出错: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"❌ 智谱AI调用失败: {e}")
+        # 返回一个明确的错误信息，而不是通用的 500
+        raise HTTPException(status_code=500, detail="AI调用失败，请检查ZhipuAI密钥是否正确。")
 
 if __name__ == "__main__":
+    # 移除 load_dotenv()，因为 Render 已经加载了环境变量
     uvicorn.run(app, host="0.0.0.0", port=8000)
