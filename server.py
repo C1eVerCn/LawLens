@@ -19,9 +19,8 @@ ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 zhipu_client = ZhipuAI(api_key=ZHIPU_API_KEY)
 
-print("⏳ 正在加载 AI 模型 (第一次启动会稍慢)...")
-embed_model = SentenceTransformer('shibing624/text2vec-base-chinese')
-print("✅ 模型加载完毕！")
+# 🚀 OOM 修复：将模型初始化为 None，实现懒加载
+embed_model = None 
 
 # 3. 创建 API 服务
 app = FastAPI()
@@ -53,8 +52,18 @@ class DocumentHistory(BaseModel):
 
 def get_relevant_laws(query: str):
     """ 去 Supabase 搜索相关的法律条款 """
+    global embed_model # 引用全局变量
+    
+    # ✅ 懒加载逻辑：只有第一次调用时才加载模型 (解决 OOM)
+    if embed_model is None:
+        print("⏳ 第一次运行，正在加载 AI 模型...")
+        # 这一步将只在第一次 API 请求时发生
+        embed_model = SentenceTransformer('shibing624/text2vec-base-chinese')
+        print("✅ 模型加载完毕！")
+
     query_vector = embed_model.encode(query).tolist()
     
+    # 调用数据库函数
     response = supabase.rpc("match_documents", {
         "query_embedding": query_vector,
         "match_threshold": 0.4, 
@@ -106,7 +115,7 @@ async def analyze(request: AnalyzeRequest):
             for doc in relevant_docs
         ])
 
-    # B. 组装提示词 (核心修改：要求 AI 生成 3 个建议问题)
+    # B. 组装提示词 (已包含生成建议问题的逻辑)
     system_prompt = """
     你是一位专业的中国法律顾问。请根据提供的【法律法规依据】分析用户的案情。
     
