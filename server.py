@@ -25,10 +25,11 @@ embed_model = None
 # 3. 创建 API 服务
 app = FastAPI()
 
-# 允许前端跨域访问
+# 允许前端跨域访问 (更新：允许所有来源访问)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    # 💥 将 allow_origins 改为 ["*"] 💥
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
