@@ -2,15 +2,15 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { supabase } from '@/lib/supabase' // 👈 引入 Supabase
-import { User } from '@supabase/supabase-js' // 类型
+import { supabase } from '@/lib/supabase' 
+import { User } from '@supabase/supabase-js' 
 import { motion, AnimatePresence } from 'framer-motion'
-// ... (其他 import 保持不变) ...
 import { 
   Gavel, Sparkles, FileText, Scale, 
   History, Download, ChevronRight, X, Clock,
-  PenTool, BookOpen, User as UserIcon, LogOut
+  PenTool, BookOpen, LogOut
 } from 'lucide-react'
+
 import { exportToWord } from '@/lib/export'
 import Editor from '@/components/editor'
 import { Button } from '@/components/ui/button'
@@ -41,15 +41,12 @@ function MainContent() {
 
   // 1. 初始化：监听 Auth 状态
   useEffect(() => {
-    // 获取当前用户
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUser(user)
     })
 
-    // 监听登录/登出变化
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
-      // 用户变化时清空历史记录列表，触发重新加载
       setHistoryList([]) 
     })
 
@@ -60,6 +57,7 @@ function MainContent() {
   useEffect(() => {
     const templateId = searchParams.get('template')
     if (templateId) {
+      // 这里的 .find 依赖于 LEGAL_TEMPLATES 是个数组
       const template = LEGAL_TEMPLATES.find(t => t.id === templateId)
       if (template) {
         setContent(template.content)
@@ -72,7 +70,6 @@ function MainContent() {
   const fetchHistory = async () => {
     setIsLoadingHistory(true)
     try {
-      // 👈 构造 URL 参数
       const url = new URL(`${API_BASE_URL}/api/history`)
       if (user) url.searchParams.append('user_id', user.id)
       
@@ -90,7 +87,7 @@ function MainContent() {
 
   useEffect(() => {
     if (showHistory) fetchHistory()
-  }, [showHistory, user]) // 当 user 变化时也会刷新
+  }, [showHistory, user])
 
   // 4. 退出登录
   const handleLogout = async () => {
@@ -136,16 +133,18 @@ function MainContent() {
         body: JSON.stringify({ 
           title, 
           content, 
-          user_id: user?.id || null // 👈 传 user_id
+          user_id: user?.id || null 
         }),
       })
     } catch (e) { console.error("保存失败", e) }
   }
 
-  const fillTemplate = (type: string) => {
-    // ... 简单模版逻辑保留，或者也可以去掉用新的模版库 ...
-    if (LEGAL_TEMPLATES.find(t => t.id === type)) {
-       // ...
+  // ✅ 修复 1: 填充模版的具体实现
+  const fillTemplate = (id: string) => {
+    const template = LEGAL_TEMPLATES.find(t => t.id === id)
+    if (template) {
+      setContent(template.content)
+      setMode('review')
     }
   }
   
@@ -205,30 +204,30 @@ function MainContent() {
         </div>
       </nav>
 
-      {/* ... 主体 Grid 布局保持不变 ... */}
       <div className="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 mt-4">
-         {/* ... 直接复制之前的 UI 代码，不需要修改 ... */}
-         {/* ... (Motion Divs for Editor and AI Panel) ... */}
-         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="lg:col-span-7 space-y-4">
+        
+        {/* 左侧：输入区域 */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="lg:col-span-7 space-y-4">
           
-          {/* 模式切换器 */}
-          <div className="bg-white p-1 rounded-xl border border-slate-200 inline-flex shadow-sm">
-            <button
-              onClick={() => setMode('draft')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-                mode === 'draft' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'
-              }`}
-            >
-              <PenTool className="w-4 h-4" /> 案情起草模式
-            </button>
-            <button
-              onClick={() => setMode('review')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-                mode === 'review' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'
-              }`}
-            >
-              <Gavel className="w-4 h-4" /> 润色合规模式
-            </button>
+          {/* ✅ 修复 2: 模版快捷栏使用正确的 ID */}
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {[
+              { label: '催款律师函', id: 'biz-letter' },
+              { label: '民事起诉状', id: 'civil-lawsuit' },
+              { label: '解除合同通知', id: 'biz-termination' },
+              { label: '借款合同', id: 'civil-loan' }
+            ].map((item, i) => (
+              <Button 
+                key={i} 
+                variant="outline" 
+                size="sm" 
+                className="rounded-full border-slate-200 hover:border-blue-600 hover:text-blue-600 bg-white transition-all whitespace-nowrap"
+                onClick={() => fillTemplate(item.id)}
+              >
+                <FileText className="w-3 h-3 mr-1.5" />
+                {item.label}
+              </Button>
+            ))}
           </div>
 
           <Card className="min-h-[700px] border-slate-200 shadow-sm bg-white flex flex-col overflow-hidden ring-4 ring-slate-50/50">
@@ -283,7 +282,6 @@ function MainContent() {
                   >
                     {/* 简单的 Markdown 渲染逻辑，特别处理修改理由 */}
                     {aiResult.split('\n').map((line, i) => {
-                      // 识别修改理由的引用块
                       if (line.trim().startsWith('> 修改理由')) {
                         return (
                           <div key={i} className="my-2 p-3 bg-amber-50 border-l-4 border-amber-400 text-amber-700 text-xs rounded-r-md">
@@ -357,7 +355,6 @@ function MainContent() {
                 </Button>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {/* 登录提示 */}
                 {!user && historyList.length === 0 && (
                   <div className="p-4 bg-blue-50 text-blue-700 text-xs rounded-lg mb-4">
                     提示：登录后您的历史记录将永久保存并在多端同步。

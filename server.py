@@ -1,13 +1,12 @@
 import os
 import uvicorn
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client, Client
 from zhipuai import ZhipuAI
 from typing import List, Optional
 
-# ... (环境变量和初始化代码保持不变) ...
 # 1. 环境变量
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
@@ -33,6 +32,7 @@ def startup_event():
     global supabase, zhipu_client
     if not all([SUPABASE_URL, SUPABASE_KEY, ZHIPU_API_KEY]):
         print("❌ 错误：核心环境变量缺失。")
+        # 在本地开发时，允许报错但不崩溃，方便调试前端
         # raise EnvironmentError("配置缺失") 
     
     try:
@@ -42,17 +42,21 @@ def startup_event():
     except Exception as e:
         print(f"❌ 初始化失败: {e}")
 
+# --- 数据模型定义 ---
+
 class AnalyzeRequest(BaseModel):
     text: str
-    mode: str = "draft"
+    mode: str = "draft" # "draft" (起草) | "review" (润色)
 
 class DocumentSave(BaseModel):
     title: str
     content: str
-    user_id: Optional[str] = None # 👈 新增 user_id 字段
+    user_id: Optional[str] = None # 👈 新增：接收用户 ID
 
-# ... (get_relevant_laws 函数保持不变，不用改) ...
+# --- 核心业务逻辑 ---
+
 def get_relevant_laws(query: str):
+    """ 轻量级向量检索 (调用智谱 API) """
     if not zhipu_client or not supabase: return []
     try:
         response = zhipu_client.embeddings.create(model="embedding-2", input=query)
@@ -67,16 +71,17 @@ def get_relevant_laws(query: str):
         print(f"❌ 检索失败: {e}")
         return []
 
-# --- 核心修改：保存带上 user_id ---
+# --- API 接口 ---
+
 @app.post("/api/save")
 async def save_document(doc: DocumentSave):
+    """ 保存文档 (支持关联用户 ID) """
     if not supabase: return {"status": "error", "msg": "DB未连接"}
     try:
-        # 如果没有 user_id (游客)，也可以保存，但 user_id 字段为 null
         data = {
             "title": doc.title, 
             "content": doc.content,
-            "user_id": doc.user_id # 写入数据库
+            "user_id": doc.user_id # 写入 user_id
         }
         supabase.table("documents").insert(data).execute()
         return {"status": "success"}
@@ -84,18 +89,18 @@ async def save_document(doc: DocumentSave):
         print(f"Save error: {e}")
         return {"status": "error", "msg": str(e)}
 
-# --- 核心修改：获取历史记录增加 user_id 过滤 ---
 @app.get("/api/history")
 async def get_history(user_id: Optional[str] = None):
+    """ 获取历史记录 (根据用户 ID 隔离数据) """
     if not supabase: return []
     try:
+        # 构建基础查询
         query = supabase.table("documents").select("*").order("created_at", desc=True).limit(20)
         
-        # 🔒 关键逻辑：如果传了 user_id，只查这个人的；如果没传，暂时只能看公共的(user_id is null)
+        # 🔒 关键逻辑：如果传了 user_id，只查这个人的；没传则查匿名的
         if user_id:
             query = query.eq("user_id", user_id)
         else:
-            # 游客只能看到未登录时创建的（可选逻辑）
             query = query.is_("user_id", "null")
             
         res = query.execute()
@@ -106,7 +111,6 @@ async def get_history(user_id: Optional[str] = None):
 
 @app.post("/api/analyze")
 async def analyze(request: AnalyzeRequest):
-    # ... (analyze 函数逻辑保持不变，不需要改动，因为分析不需要 user_id) ...
     print(f"🔍 请求模式: {request.mode}, 内容预览: {request.text[:20]}...")
     
     # 1. 检索法条 (RAG)
@@ -130,7 +134,7 @@ async def analyze(request: AnalyzeRequest):
         3. 语言必须严谨、法言法语，但对普通人提到的事实要进行法律转化。
         4. 文书末尾用 "|||" 分隔，然后列出3个后续建议。
         """
-    else: # review mode
+    else: # review mode (润色)
         system_prompt = f"""
         你是一名资深法务专家。用户的输入是一份【法律文书初稿】。
         你的任务是：从合规性、逻辑性、语言准确度、格式规范、法条引用五个维度进行深度润色。
@@ -141,7 +145,8 @@ async def analyze(request: AnalyzeRequest):
         【输出要求】：
         1. 输出修改后的完整文书。
         2. 在修改过的关键地方，请在文书对应的段落后，用Markdown的引用格式（> 修改理由：...）标注出你的修改理由，方便用户对比。
-        3. 文书末尾用 "|||" 分隔，然后列出3个后续建议。
+        3. 比如：原句“我要他赔钱”，你改为“请求判令被告赔偿损失”，并在后面加一行 “> 修改理由：将口语转化为规范的诉讼请求表述。”
+        4. 文书末尾用 "|||" 分隔，然后列出3个后续建议。
         """
 
     try:
