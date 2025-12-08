@@ -3,6 +3,6 @@ uvicorn
 pydantic
 python-dotenv
 supabase
-zhipuai>=2.1.0
+openai
 PyJWT==2.8.0
-sniffio
+tqdm
