@@ -2,10 +2,12 @@ import os
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse 
 from pydantic import BaseModel
 from supabase import create_client, Client
 from openai import OpenAI
-from typing import List, Optional, Dict
+from typing import List, Optional
+import json
 
 # 1. 环境变量
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -41,25 +43,21 @@ def startup_event():
         print(f"❌ 初始化失败: {e}")
 
 # --- Pydantic 模型 ---
-
-# 👇 新增：对话消息结构
 class ChatMessage(BaseModel):
     role: str
     content: str
 
-# 👇 修改：请求体包含历史记录和当前文档内容
 class AnalyzeRequest(BaseModel):
-    messages: List[ChatMessage] # 对话历史
-    current_doc: str = ""       # 编辑器里的当前内容
-    mode: str = "draft"         # draft | polish
+    messages: List[ChatMessage]
+    current_doc: str = ""
+    mode: str = "draft"
 
 class DocumentSave(BaseModel):
     title: str
     content: str
     user_id: Optional[str] = None
 
-# --- 原有的辅助接口 (Save / History) 保持不变 ---
-
+# --- 辅助接口 (Save / History) ---
 @app.post("/api/save")
 async def save_document(doc: DocumentSave):
     if not supabase: return {"status": "error", "msg": "DB未连接"}
@@ -84,19 +82,19 @@ async def get_history(user_id: Optional[str] = None):
         print(f"History error: {e}")
         return []
 
-# --- 核心升级：RAG 检索与 AI 分析 ---
+# --- 核心升级：RAG 检索与流式 AI 分析 ---
 
 def get_relevant_laws(query: str):
     if not client or not supabase: return []
     try:
-        # 1. 生成向量 (保持使用 BAAI/bge-m3)
+        # 1. 生成向量 (BAAI/bge-m3)
         response = client.embeddings.create(model="BAAI/bge-m3", input=query)
         query_vector = response.data[0].embedding
         
-        # 2. 数据库查询 (注意：请确保 SQL 函数 match_documents 已更新为 1024 维度)
+        # 2. 数据库查询 (确保 SQL match_documents 适配 1024 维度)
         rpc_response = supabase.rpc("match_documents", {
             "query_embedding": query_vector,
-            "match_threshold": 0.35, # 👇 降低阈值以确保能查到案例
+            "match_threshold": 0.35,
             "match_count": 5
         }).execute()
         return rpc_response.data
@@ -106,65 +104,101 @@ def get_relevant_laws(query: str):
 
 @app.post("/api/analyze")
 async def analyze(request: AnalyzeRequest):
-    # 获取用户最新的一条消息
     last_user_msg = request.messages[-1].content
-    print(f"🔍 请求: {last_user_msg[:20]}... 模式: {request.mode}")
+    print(f"🔍 流式请求: {last_user_msg[:20]}... 模式: {request.mode}")
     
-    # RAG 检索
+    # 1. RAG 检索
     relevant_docs = get_relevant_laws(last_user_msg)
     
-    # 构建上下文引用文本
     context_text = ""
     if relevant_docs:
-        context_text = "【必须引用的法律库/案例库】\n" + "\n".join(
-            [f"{i+1}. 案号/法规名:《{d['law_name']}》\n   摘要:{d['content'][:300]}..." 
+        context_text = "【权威法律依据库（必须优先引用）】\n" + "\n".join(
+            [f"依据{i+1}:《{d['law_name']}》\n条款内容:{d['content'][:400]}" 
              for i, d in enumerate(relevant_docs)]
         )
     else:
-        context_text = "（本次未检索到强相关案例，请依据通用法律原则）"
+        context_text = "（未检索到特定库内案例，请严格依据《中华人民共和国民法典》及相关司法解释）"
 
-    # 构建 System Prompt
-    system_instruction = f"""
-    你是一个精通中国法律的资深律师助手。
+    # 2. 构建超级 System Prompt (人设 + 格式控制)
     
-    任务目标：
-    1. 根据用户的指令生成或修改法律文书。
-    2. 严格参考提供的【法律库/案例库】。**必须在回复中显式引用**相关的案号或法规名称（如“参照(2023)京01民终...号判决”）。
-    3. 如果是生成模式，请直接输出文书正文。
-    4. 如果是润色模式，请说明修改理由并输出修改后的段落。
-    
-    {context_text}
+    base_role = """
+    你是一名拥有 20 年经验的中国红圈律所高级合伙人，专精于民商事诉讼文书。
+    你的文书风格必须：结构严谨、逻辑缜密、用词极其专业（法言法语）。
+    """
+
+    format_instruction = """
+    【重要格式要求】
+    前端使用富文本编辑器，请直接输出 HTML 格式的代码，不要使用 Markdown。
+    1. 使用 <p> 包裹段落。
+    2. 使用 <b> 或 <strong> 加粗重要的小标题（如“事实与理由”、“诉讼请求”）。
+    3. 使用 <br> 进行换行。
+    4. 严禁使用 ```html 代码块包裹，直接输出内容即可。
     """
 
     if request.mode == "polish":
-        system_instruction += f"\n【当前文档内容】：\n'''\n{request.current_doc}\n'''\n请基于用户最新指令对上述文档进行修改。"
-    else:
-        system_instruction += "\n请根据用户描述从头起草文书。"
+        system_instruction = f"""
+        {base_role}
+        
+        【任务目标】
+        对用户提供的法律文书初稿进行专业级润色。
+        
+        【原始文档内容】
+        '''
+        {request.current_doc}
+        '''
 
-    # 组合消息历史发送给 AI (实现追问功能)
+        【修改要求】
+        1. **术语专业化**：将口语表达转化为标准法言法语（例如：将“想要钱”改为“诉请支付”；将“说话不算数”改为“构成根本违约”）。
+        2. **逻辑严密性**：检查因果关系，使用“鉴于...”、“综上所述...”等连接词增强逻辑链。
+        3. **引用规范化**：参考下方的【权威法律依据库】，对文中的法条引用进行核对或补充。
+        4. **HTML排版**：重点内容（如金额、关键法条）请使用 <b> 加粗。
+        
+        {format_instruction}
+        {context_text}
+        """
+    else: # draft mode
+        system_instruction = f"""
+        {base_role}
+        
+        【任务目标】
+        根据用户提供的案情描述，从零起草一份结构严谨、攻防兼备的法律文书。
+        
+        【起草标准】
+        1. **结构完备**：必须包含首部（原被告信息）、诉讼请求、事实与理由、尾部（致谢、具状人、日期）四大板块。
+        2. **事实陈述**：采用“时间轴+法律事实”的叙述方式，冷静、客观、有力。
+        3. **法律适用**：必须在“理由”部分显式引用下方的【权威法律依据库】。引用格式为：“根据《XX法》第XX条之规定...”。
+        4. **HTML排版**：
+           - 小标题（如【诉讼请求】）请使用 <b> 加粗。
+           - 关键金额请使用 <b> 加粗。
+           - 段落之间保持适当间距。
+
+        {format_instruction}
+        {context_text}
+        """
+
     llm_messages = [{"role": "system", "content": system_instruction}]
-    # 将 Pydantic 对象转为字典
-    llm_messages.extend([m.dict() for m in request.messages])
+    # 只取最近几条消息，避免 System Prompt 被淹没
+    recent_history = request.messages[-3:] if len(request.messages) > 3 else request.messages
+    llm_messages.extend([m.dict() for m in recent_history if m.role != 'system'])
 
-    try:
-        # 建议使用指令遵循能力强的模型
-        MODEL_NAME = "Qwen/Qwen2.5-32B-Instruct" 
-        
-        response = client.chat.completions.create(
-            model=MODEL_NAME, 
-            messages=llm_messages,
-            stream=False
-        )
-        result = response.choices[0].message.content
-        
-        # 简单的后续建议 (也可以让 AI 生成，这里简化处理)
-        suggestions = ["增加违约金条款", "补充证据链细节", "调整为更强硬的语气"]
+    # 3. 定义生成器 (Generator)
+    async def generate_stream():
+        try:
+            stream = client.chat.completions.create(
+                model="Qwen/Qwen2.5-32B-Instruct", 
+                messages=llm_messages,
+                stream=True, 
+                temperature=0.7,
+                max_tokens=2500 # 增加长度以防截断
+            )
+            for chunk in stream:
+                if chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+        except Exception as e:
+            yield f"<p style='color:red'>[System Error: {str(e)}]</p>"
 
-        return {"result": result, "suggestions": suggestions}
-
-    except Exception as e:
-        print(f"❌ AI生成失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # 4. 返回流式响应
+    return StreamingResponse(generate_stream(), media_type="text/event-stream")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

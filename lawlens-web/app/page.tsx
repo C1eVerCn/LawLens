@@ -15,8 +15,6 @@ import Editor from '@/components/editor'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-// ❌ 删除: import { ScrollArea } from '@/components/ui/scroll-area'
-// ✅ 替换: 直接用 div 实现滚动
 import { LEGAL_TEMPLATES } from '@/lib/templates' 
 import Link from 'next/link'
 
@@ -134,7 +132,7 @@ function MainContent() {
     setMessages(prev => [...prev, { role: 'assistant', content: `已加载历史文档：${item.title}` }])
   }
 
-  // 发送消息
+  // 🔥 核心重写：流式发送与接收
   const handleSend = async () => {
     if (!input.trim() || isAnalyzing) return
     
@@ -143,37 +141,66 @@ function MainContent() {
     setInput('')
     setIsAnalyzing(true)
 
+    // 1. 先创建一个空的 AI 消息占位
+    const aiMsgPlaceholder: Message = { role: 'assistant', content: '' }
+    setMessages(prev => [...prev, aiMsgPlaceholder])
+
     try {
       const response = await fetch(`${API_BASE_URL}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: [...messages, newMsg], 
-          current_doc: content,            
+          messages: [...messages, newMsg], // 带上历史
+          current_doc: content,            // 带上当前文档
           mode: mode
         }),
       })
 
-      if (!response.ok) throw new Error("API Error")
-      const data = await response.json()
-      
-      const aiMsg: Message = { role: 'assistant', content: data.result }
-      setMessages(prev => [...prev, aiMsg])
-      
-      if (data.result && !data.result.includes("抱歉")) {
-          setContent(data.result)
-          saveDocument(data.result) 
+      if (!response.ok) throw new Error("API Connection Error")
+      if (!response.body) throw new Error("No response body")
+
+      // 2. 建立流读取器
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let done = false
+      let fullText = ''
+
+      // 3. 循环读取数据包
+      while (!done) {
+        const { value, done: doneReading } = await reader.read()
+        done = doneReading
+        const chunkValue = decoder.decode(value, { stream: true })
+        
+        fullText += chunkValue
+
+        // 实时更新聊天框气泡
+        setMessages(prev => {
+            const newArr = [...prev]
+            // 更新最后一条消息（即 AI 的回复）
+            newArr[newArr.length - 1] = { role: 'assistant', content: fullText }
+            return newArr
+        })
+
+        // 实时同步到编辑器 (实现 Copilot 效果)
+        // 这里做一个简单的优化：如果是生成模式，或者用户明确要求修改，就直接同步
+        // 实际使用中，这种“边说边写”的体验非常爽快
+        setContent(fullText)
+      }
+
+      // 4. 生成完毕后保存
+      if (fullText.length > 10) {
+         saveDocument(fullText)
       }
 
     } catch (error) {
       console.error(error)
-      setMessages(prev => [...prev, { role: 'assistant', content: "⚠️ 服务器连接失败，请检查 Python 后端。" }])
+      setMessages(prev => [...prev, { role: 'assistant', content: "⚠️ 网络连接中断或服务器错误。" }])
     } finally {
       setIsAnalyzing(false)
     }
   }
 
-  // ✅ 修复 2: 添加 `as const` 解决 TS 类型报错
+  // 动画配置
   const springAnim = { type: "spring" as const, stiffness: 300, damping: 30 }
 
   return (
@@ -245,7 +272,7 @@ function MainContent() {
                 </div>
             </div>
 
-            {/* 聊天区域 (✅ 修复 1: 替换 ScrollArea 为原生 div) */}
+            {/* 聊天区域 */}
             <div className="flex-1 px-4 py-2 bg-slate-50/50 overflow-y-auto">
                 <div className="space-y-4 pb-4">
                     {messages.length === 0 && (
@@ -277,14 +304,16 @@ function MainContent() {
                                 ? 'bg-slate-900 text-white rounded-br-sm' 
                                 : 'bg-white border border-slate-100 text-slate-700 rounded-bl-sm'
                             }`}>
+                                {/* 如果是流式输出，可能没有 Markdown 渲染，这里直接显示文本即可 */}
                                 {m.content}
                             </div>
                         </motion.div>
                     ))}
                     
-                    {isAnalyzing && (
+                    {isAnalyzing && messages.length > 0 && messages[messages.length-1].role === 'user' && (
+                        // 只有当最后一条是用户消息时才显示 Loading，一旦 AI 开始回复（即便只是空字符串），Loading 就应该消失或变为打字状态
                         <div className="flex items-center gap-2 text-slate-400 text-xs pl-2">
-                            <Sparkles className="w-4 h-4 animate-spin" /> AI 正在思考与检索案例...
+                            <Sparkles className="w-4 h-4 animate-spin" /> 正在连接 AI...
                         </div>
                     )}
                     <div ref={chatEndRef} />
