@@ -1,45 +1,68 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from 'docx'
+import { asBlob } from 'html-docx-js-typescript'
 import { saveAs } from 'file-saver'
 
-export const exportToWord = async (content: string, filename: string = '法律文书.docx') => {
-  if (!content) return
+export const exportToWord = async (htmlContent: string, filename: string = '法律文书.docx') => {
+  // 1. 构建一个完整的 HTML 结构，包含针对 Word 优化的 CSS
+  // Word 对 CSS 的支持有限，但 font-family 和 font-size 是支持的
+  const fullHtml = `
+    <!DOCTYPE html>
+    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+    <head>
+      <meta charset="utf-8">
+      <title>${filename}</title>
+      <style>
+        body {
+          font-family: 'SimSun', 'Songti SC', serif; /* 强制宋体 */
+          font-size: 16px; /* 对应 Word 小三/四号 */
+          line-height: 1.5;
+        }
+        p {
+          margin-bottom: 12pt;
+          text-align: justify;
+        }
+        h1 {
+          font-size: 24px;
+          font-weight: bold;
+          text-align: center;
+          margin-top: 24pt;
+          margin-bottom: 24pt;
+        }
+        h2 {
+          font-size: 18px;
+          font-weight: bold;
+          margin-top: 18pt;
+          margin-bottom: 12pt;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-bottom: 12pt;
+        }
+        td, th {
+          border: 1px solid #000;
+          padding: 8px;
+        }
+      </style>
+    </head>
+    <body>
+      ${htmlContent}
+    </body>
+    </html>
+  `
 
-  // 1. 将文本按行分割，简单处理段落
-  const lines = content.split('\n')
-  
-  // 2. 创建文档段落
-  const children = lines.map(line => {
-    // 简单的逻辑：如果是短标题（比如【律师函】），加粗居中
-    const isTitle = line.trim().startsWith('【') && line.trim().endsWith('】')
-    
-    return new Paragraph({
-      text: line,
-      heading: isTitle ? HeadingLevel.HEADING_1 : undefined,
-      alignment: isTitle ? AlignmentType.CENTER : AlignmentType.LEFT,
-      spacing: {
-        after: 200, // 段后间距
-        line: 360,  // 行高
-      },
-      children: [
-        new TextRun({
-          text: line,
-          size: isTitle ? 32 : 24, // 标题 16pt，正文 12pt (docx size 是半点)
-          bold: isTitle,
-          font: "SimSun", // 宋体，法律文书标准
-        }),
-      ],
+  try {
+    // 2. 转换为 Word Blob
+    // @ts-ignore (这个库的类型定义有时候会报错，忽略即可)
+    const blob = await asBlob(fullHtml, {
+      orientation: 'portrait',
+      margins: { top: 720, right: 720, bottom: 720, left: 720 } // 模拟页边距
     })
-  })
-
-  // 3. 生成文档对象
-  const doc = new Document({
-    sections: [{
-      properties: {},
-      children: children,
-    }],
-  })
-
-  // 4. 打包并下载
-  const blob = await Packer.toBlob(doc)
-  saveAs(blob, filename)
+    
+    // 3. 触发下载
+    saveAs(blob as Blob, filename)
+    
+  } catch (error) {
+    console.error("导出失败:", error)
+    alert("导出失败，请检查浏览器兼容性")
+  }
 }
