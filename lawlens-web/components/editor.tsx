@@ -2,11 +2,8 @@
 
 import { useEditor, EditorContent, BubbleMenu } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-
-// ✅ 关键修复 1：Extension 通常是默认导出，去掉花括号 {}
-// 同时重命名为 BubbleMenuExtension 以避免与上面的 React 组件 BubbleMenu 冲突
+// Extension 引入
 import BubbleMenuExtension from '@tiptap/extension-bubble-menu'
-
 import { Underline } from '@tiptap/extension-underline'
 import { TextAlign } from '@tiptap/extension-text-align'
 import { TextStyle } from '@tiptap/extension-text-style'
@@ -26,9 +23,8 @@ import {
   Bold, Italic, Underline as UnderlineIcon, Strikethrough,
   AlignLeft, AlignCenter, AlignRight, AlignJustify,
   List, ListOrdered, Heading1, Heading2, 
-  Undo, Redo, Eraser, Highlighter, Link as LinkIcon,
-  Table as TableIcon, Minus, Quote, Indent, Outdent,
-  Sparkles, Loader2 
+  Undo, Redo, Highlighter, Link as LinkIcon,
+  Table as TableIcon, Quote, Sparkles, Loader2, Minus
 } from 'lucide-react'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
@@ -39,80 +35,61 @@ interface EditorProps {
   className?: string
 }
 
-// --- MenuBar 组件 (工具栏) ---
+// --- 专业版工具栏 ---
 const MenuBar = ({ editor }: { editor: any }) => {
   if (!editor) return null
 
-  const btn = (isActive: boolean = false, disabled: boolean = false) => cn(
-    "p-1.5 rounded-md hover:bg-slate-200 transition-colors text-slate-600 flex items-center justify-center min-w-[32px] min-h-[32px]",
-    isActive ? "bg-slate-200 text-black font-bold shadow-sm" : "",
-    disabled ? "opacity-50 cursor-not-allowed hover:bg-transparent" : ""
+  const btnClass = (isActive: boolean = false) => cn(
+    "flex items-center justify-center w-7 h-7 rounded hover:bg-slate-100 transition-colors text-slate-600",
+    isActive ? "bg-blue-50 text-blue-600" : ""
   )
-  const separator = <div className="w-[1px] h-6 bg-slate-300 mx-1 self-center" />
-
-  const setLink = () => {
-    const previousUrl = editor.getAttributes('link').href
-    const url = window.prompt('URL', previousUrl)
-    if (url === null) return 
-    if (url === '') {
-      editor.chain().focus().extendMarkRange('link').unsetLink().run()
-      return
-    }
-    editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
-  }
+  
+  const Divider = () => <div className="w-[1px] h-4 bg-slate-200 mx-1.5 self-center" />
 
   return (
-    <div className="flex flex-col border-b border-slate-200 bg-slate-50 sticky top-0 z-20">
-      <div className="flex flex-wrap gap-0.5 p-1.5 border-b border-slate-200/50">
-        <button onClick={() => editor.chain().focus().undo().run()} className={btn()}><Undo className="w-4 h-4"/></button>
-        <button onClick={() => editor.chain().focus().redo().run()} className={btn()}><Redo className="w-4 h-4"/></button>
-        {separator}
-        <button onClick={() => editor.chain().focus().setFontFamily('SimSun').run()} className={cn(btn(editor.isActive('textStyle', { fontFamily: 'SimSun' })), "w-auto px-2 text-xs font-serif")}>宋体</button>
-        <button onClick={() => editor.chain().focus().setFontFamily('SimHei').run()} className={cn(btn(editor.isActive('textStyle', { fontFamily: 'SimHei' })), "w-auto px-2 text-xs font-sans")}>黑体</button>
-        {separator}
-        <button onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} className={btn(editor.isActive('heading', { level: 1 }))}><Heading1 className="w-4 h-4"/></button>
-        <button onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} className={btn(editor.isActive('heading', { level: 2 }))}><Heading2 className="w-4 h-4"/></button>
-        {separator}
-        <button onClick={() => editor.chain().focus().toggleBold().run()} className={btn(editor.isActive('bold'))}><Bold className="w-4 h-4"/></button>
-        <button onClick={() => editor.chain().focus().toggleItalic().run()} className={btn(editor.isActive('italic'))}><Italic className="w-4 h-4"/></button>
-        <button onClick={() => editor.chain().focus().toggleUnderline().run()} className={btn(editor.isActive('underline'))}><UnderlineIcon className="w-4 h-4"/></button>
-        <button onClick={() => editor.chain().focus().toggleStrike().run()} className={btn(editor.isActive('strike'))}><Strikethrough className="w-4 h-4"/></button>
-        <button onClick={() => editor.chain().focus().toggleHighlight().run()} className={btn(editor.isActive('highlight'))}><Highlighter className="w-4 h-4 text-yellow-500"/></button>
-        <div className="flex items-center gap-1 mx-1 px-1 border-l border-r border-slate-300">
-           <button onClick={() => editor.chain().focus().setColor('#000000').run()} className="w-3 h-3 rounded-full bg-black border border-slate-300"/>
-           <button onClick={() => editor.chain().focus().setColor('#ef4444').run()} className="w-3 h-3 rounded-full bg-red-600 border border-slate-300"/>
-           <button onClick={() => editor.chain().focus().setColor('#2563eb').run()} className="w-3 h-3 rounded-full bg-blue-600 border border-slate-300"/>
-        </div>
+    <div className="flex items-center flex-wrap px-4 py-2 border-b border-slate-200 bg-white sticky top-0 z-20 shadow-[0_2px_4px_rgba(0,0,0,0.02)]">
+      {/* 1. 历史操作 */}
+      <div className="flex items-center gap-0.5">
+        <button onClick={() => editor.chain().focus().undo().run()} className={btnClass()} title="撤销"><Undo className="w-4 h-4"/></button>
+        <button onClick={() => editor.chain().focus().redo().run()} className={btnClass()} title="重做"><Redo className="w-4 h-4"/></button>
       </div>
-      <div className="flex flex-wrap gap-0.5 p-1.5 bg-slate-50/50">
-        <button onClick={() => editor.chain().focus().setTextAlign('left').run()} className={btn(editor.isActive({ textAlign: 'left' }))}><AlignLeft className="w-4 h-4"/></button>
-        <button onClick={() => editor.chain().focus().setTextAlign('center').run()} className={btn(editor.isActive({ textAlign: 'center' }))}><AlignCenter className="w-4 h-4"/></button>
-        <button onClick={() => editor.chain().focus().setTextAlign('right').run()} className={btn(editor.isActive({ textAlign: 'right' }))}><AlignRight className="w-4 h-4"/></button>
-        <button onClick={() => editor.chain().focus().setTextAlign('justify').run()} className={btn(editor.isActive({ textAlign: 'justify' }))}><AlignJustify className="w-4 h-4"/></button>
-        {separator}
-        <button onClick={() => editor.chain().focus().toggleBulletList().run()} className={btn(editor.isActive('bulletList'))}><List className="w-4 h-4"/></button>
-        <button onClick={() => editor.chain().focus().toggleOrderedList().run()} className={btn(editor.isActive('orderedList'))}><ListOrdered className="w-4 h-4"/></button>
-        <button onClick={() => editor.chain().focus().sinkListItem('listItem').run()} disabled={!editor.can().sinkListItem('listItem')} className={btn(false, !editor.can().sinkListItem('listItem'))}><Indent className="w-4 h-4"/></button>
-        <button onClick={() => editor.chain().focus().liftListItem('listItem').run()} disabled={!editor.can().liftListItem('listItem')} className={btn(false, !editor.can().liftListItem('listItem'))}><Outdent className="w-4 h-4"/></button>
-        {separator}
-        <button onClick={() => editor.chain().focus().toggleBlockquote().run()} className={btn(editor.isActive('blockquote'))}><Quote className="w-4 h-4"/></button>
-        <button onClick={() => editor.chain().focus().setHorizontalRule().run()} className={btn()}><Minus className="w-4 h-4"/></button>
-        <button onClick={setLink} className={btn(editor.isActive('link'))}><LinkIcon className="w-4 h-4"/></button>
-        {separator}
-        <button onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} className={btn()}><TableIcon className="w-4 h-4"/></button>
-        {editor.isActive('table') && (
-           <button onClick={() => editor.chain().focus().deleteTable().run()} className={cn(btn(), "text-red-500")}><Eraser className="w-4 h-4"/></button>
-        )}
-        <div className="flex-1" />
-        <button onClick={() => editor.chain().focus().unsetAllMarks().run()} className={btn()}><Eraser className="w-4 h-4"/></button>
+      
+      <Divider />
+
+      {/* 2. 标题与格式 */}
+      <div className="flex items-center gap-0.5">
+        <button onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} className={btnClass(editor.isActive('heading', { level: 1 }))} title="一级标题"><Heading1 className="w-4 h-4"/></button>
+        <button onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} className={btnClass(editor.isActive('heading', { level: 2 }))} title="二级标题"><Heading2 className="w-4 h-4"/></button>
+        <button onClick={() => editor.chain().focus().toggleBold().run()} className={btnClass(editor.isActive('bold'))} title="加粗"><Bold className="w-4 h-4"/></button>
+        <button onClick={() => editor.chain().focus().toggleItalic().run()} className={btnClass(editor.isActive('italic'))} title="斜体"><Italic className="w-4 h-4"/></button>
+        <button onClick={() => editor.chain().focus().toggleUnderline().run()} className={btnClass(editor.isActive('underline'))} title="下划线"><UnderlineIcon className="w-4 h-4"/></button>
+        <button onClick={() => editor.chain().focus().toggleHighlight().run()} className={btnClass(editor.isActive('highlight'))} title="高亮"><Highlighter className="w-4 h-4 text-yellow-500"/></button>
+      </div>
+
+      <Divider />
+
+      {/* 3. 段落对齐 */}
+      <div className="flex items-center gap-0.5">
+        <button onClick={() => editor.chain().focus().setTextAlign('left').run()} className={btnClass(editor.isActive({ textAlign: 'left' }))}><AlignLeft className="w-4 h-4"/></button>
+        <button onClick={() => editor.chain().focus().setTextAlign('center').run()} className={btnClass(editor.isActive({ textAlign: 'center' }))}><AlignCenter className="w-4 h-4"/></button>
+        <button onClick={() => editor.chain().focus().setTextAlign('right').run()} className={btnClass(editor.isActive({ textAlign: 'right' }))}><AlignRight className="w-4 h-4"/></button>
+        <button onClick={() => editor.chain().focus().toggleBulletList().run()} className={btnClass(editor.isActive('bulletList'))}><List className="w-4 h-4"/></button>
+        <button onClick={() => editor.chain().focus().toggleOrderedList().run()} className={btnClass(editor.isActive('orderedList'))}><ListOrdered className="w-4 h-4"/></button>
+      </div>
+
+      <Divider />
+
+      {/* 4. 插入对象 */}
+      <div className="flex items-center gap-0.5">
+        <button onClick={() => editor.chain().focus().toggleBlockquote().run()} className={btnClass(editor.isActive('blockquote'))}><Quote className="w-4 h-4"/></button>
+        <button onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} className={btnClass()}><TableIcon className="w-4 h-4"/></button>
+        <button onClick={() => editor.chain().focus().setHorizontalRule().run()} className={btnClass()}><Minus className="w-4 h-4"/></button>
       </div>
     </div>
   )
 }
 
-// --- 主编辑器组件 ---
 export default function Editor({ content, onChange, className }: EditorProps) {
-  
   const [isPolishingSelection, setIsPolishingSelection] = useState(false)
 
   const editor = useEditor({
@@ -121,7 +98,6 @@ export default function Editor({ content, onChange, className }: EditorProps) {
         bulletList: { keepMarks: true, keepAttributes: false },
         orderedList: { keepMarks: true, keepAttributes: false },
       }),
-      // ✅ 关键修复 2：配置 Extension
       BubbleMenuExtension.configure({
         pluginKey: 'bubbleMenu',
       }),
@@ -133,18 +109,21 @@ export default function Editor({ content, onChange, className }: EditorProps) {
     ],
     editorProps: {
       attributes: {
-        class: 'prose prose-sm sm:prose-base lg:prose-lg xl:prose-xl focus:outline-none min-h-[800px] px-12 py-10 font-serif text-slate-800 leading-loose max-w-none shadow-sm',
+        // ✨ A4 纸张核心样式 ✨
+        // min-h-[1056px]: A4 纸高度模拟
+        // px-16 py-14: 页边距
+        // shadow-lg: 纸张投影
+        class: 'print-content prose prose-slate max-w-none focus:outline-none min-h-[1056px] px-12 py-16 bg-white shadow-lg border border-slate-200 mx-auto font-serif text-slate-800 leading-loose',
       },
     },
     content: content,
     onUpdate: ({ editor }) => {
       onChange(editor.getHTML())
     },
-    // Next.js hydration fix
     immediatelyRender: false 
   })
 
-  // 监听外部 content 变化
+  // 保持内容同步逻辑
   useEffect(() => {
     if (editor && content && content !== editor.getHTML()) {
       if (!editor.isFocused) { 
@@ -173,7 +152,7 @@ export default function Editor({ content, onChange, className }: EditorProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: [{ role: 'user', content: "请优化这段文字" }], 
+          messages: [{ role: 'user', content: "请优化这段文字，使其更符合法律规范" }], 
           selection: selection, 
           mode: 'selection_polish' 
         }),
@@ -202,68 +181,74 @@ export default function Editor({ content, onChange, className }: EditorProps) {
 
     } catch (e) {
       console.error(e)
-      alert("AI 连接失败，请检查后端服务")
+      alert("AI 连接失败")
     } finally {
       setIsPolishingSelection(false)
     }
   }
 
   return (
-    <div className={cn("flex flex-col h-full bg-white border border-slate-200 rounded-lg shadow-md overflow-hidden relative", className)}>
-      <MenuBar editor={editor} />
+    <div className={cn("flex flex-col w-full h-full", className)}>
+      
+      {/* 顶部工具栏 (Sticky) */}
+      <div className="sticky top-0 z-30">
+        <MenuBar editor={editor} />
+      </div>
 
-      {/* Bubble Menu 组件 */}
+      {/* Bubble Menu (浮动菜单) */}
       {editor && (
         <BubbleMenu 
             editor={editor} 
-            tippyOptions={{ duration: 100 }}
+            tippyOptions={{ duration: 100, zIndex: 99 }}
             shouldShow={({ from, to }: any) => {
-                // 只有当有选中内容且不在 AI 处理中时显示
                 return from !== to && !isPolishingSelection
             }}
         >
-            <div className="flex items-center gap-1 p-1 bg-slate-900 text-white rounded-lg shadow-xl border border-slate-700 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center gap-1 p-1 bg-slate-900/90 backdrop-blur-sm text-white rounded-lg shadow-xl border border-slate-700 animate-in fade-in zoom-in duration-200">
                 <button
                     onClick={handleAiPolishSelection}
-                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium hover:bg-slate-700 rounded transition-colors group"
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium hover:bg-slate-700 rounded transition-colors group"
                 >
-                    <Sparkles className="w-3 h-3 text-yellow-400 group-hover:animate-pulse" />
+                    <Sparkles className="w-3 h-3 text-purple-400 group-hover:animate-pulse" />
                     AI 润色
                 </button>
                 <div className="w-[1px] h-3 bg-slate-700 mx-1" />
-                <button onClick={() => editor.chain().focus().toggleBold().run()} className={cn("p-1 hover:bg-slate-700 rounded", editor.isActive('bold') && 'text-blue-400')}><Bold className="w-3 h-3" /></button>
-                <button onClick={() => editor.chain().focus().toggleHighlight().run()} className={cn("p-1 hover:bg-slate-700 rounded", editor.isActive('highlight') && 'text-yellow-400')}><Highlighter className="w-3 h-3" /></button>
+                <button onClick={() => editor.chain().focus().toggleBold().run()} className={cn("p-1.5 hover:bg-slate-700 rounded", editor.isActive('bold') && 'text-blue-400')}><Bold className="w-3.5 h-3.5" /></button>
+                <button onClick={() => editor.chain().focus().toggleHighlight().run()} className={cn("p-1.5 hover:bg-slate-700 rounded", editor.isActive('highlight') && 'text-yellow-400')}><Highlighter className="w-3.5 h-3.5" /></button>
             </div>
         </BubbleMenu>
       )}
 
-      <div className="flex-1 overflow-y-auto bg-slate-100/50 cursor-text p-4 flex justify-center" onClick={() => editor?.commands.focus()}>
-        <div className="bg-white w-full max-w-[850px] min-h-[800px] shadow-sm border border-slate-200 relative">
-             <EditorContent editor={editor} className="h-full" />
+      {/* 编辑区域 (点击空白处聚焦) */}
+      <div className="flex-1 bg-[#F3F4F6] cursor-text py-8" onClick={() => editor?.commands.focus()}>
+             <EditorContent editor={editor} />
              
              {isPolishingSelection && (
-                 <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 text-xs rounded-full border border-blue-100 shadow-sm animate-pulse z-50">
-                     <Loader2 className="w-3 h-3 animate-spin" />
-                     AI 正在重写...
+                 <div className="fixed bottom-10 right-10 flex items-center gap-3 px-4 py-3 bg-white text-slate-700 text-sm font-medium rounded-full border border-slate-200 shadow-2xl animate-bounce z-50">
+                     <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                     AI 正在优化选中内容...
                  </div>
              )}
-        </div>
       </div>
 
       <style jsx global>{`
-        .ProseMirror { font-family: "SimSun", "Songti SC", serif; }
-        .ProseMirror h1 { font-size: 1.8em; font-weight: 900; text-align: center; margin-top: 0.5em; }
-        .ProseMirror h2 { font-size: 1.4em; font-weight: bold; margin-top: 1em; margin-bottom: 0.5em; }
-        .ProseMirror p { margin-bottom: 0.8em; text-align: justify; line-height: 1.8; }
-        .ProseMirror blockquote { border-left: 4px solid #cbd5e1; padding-left: 1em; color: #64748b; font-style: italic; background: #f8fafc; padding: 0.5rem; }
-        .ProseMirror table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 0; overflow: hidden; }
-        .ProseMirror td, .ProseMirror th { min-width: 1em; border: 1px solid #ced4da; padding: 8px 12px; vertical-align: top; box-sizing: border-box; position: relative; }
-        .ProseMirror th { font-weight: bold; text-align: left; background-color: #f1f3f5; }
-        .ProseMirror .selectedCell:after { z-index: 2; position: absolute; content: ""; left: 0; right: 0; top: 0; bottom: 0; background: rgba(200, 200, 255, 0.4); pointer-events: none; }
-        .ProseMirror ul { list-style-type: disc; padding-left: 1.5em; }
-        .ProseMirror ol { list-style-type: decimal; padding-left: 1.5em; }
-        .ProseMirror a { text-decoration: underline; color: #2563eb; cursor: pointer; }
-        .ProseMirror hr { border-top: 2px solid #e2e8f0; margin: 2rem 0; }
+        /* 强制宋体/衬线体，增强法律文件感 */
+        .ProseMirror { font-family: "SimSun", "Songti SC", "Times New Roman", serif; }
+        
+        /* 标题样式 */
+        .ProseMirror h1 { font-size: 24pt; font-weight: 900; text-align: center; margin-bottom: 24pt; margin-top: 12pt; color: #000; }
+        .ProseMirror h2 { font-size: 16pt; font-weight: bold; margin-top: 18pt; margin-bottom: 12pt; }
+        
+        /* 正文样式 */
+        .ProseMirror p { margin-bottom: 12pt; text-align: justify; line-height: 1.8; font-size: 12pt; }
+        
+        /* 表格样式 */
+        .ProseMirror table { border-collapse: collapse; margin: 0; overflow: hidden; width: 100%; }
+        .ProseMirror td, .ProseMirror th { border: 1px solid #000; padding: 6px 10px; vertical-align: top; }
+        .ProseMirror th { font-weight: bold; background-color: #f8f9fa; }
+        
+        /* 引用样式 */
+        .ProseMirror blockquote { border-left: 3px solid #000; padding-left: 1em; margin-left: 0; color: #4b5563; font-style: italic; }
       `}</style>
     </div>
   )
