@@ -5,15 +5,17 @@ import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase' 
 import { User } from '@supabase/supabase-js' 
 import { motion, AnimatePresence } from 'framer-motion'
+import { useDropzone } from 'react-dropzone' 
 import { 
   ShieldCheck, History, Download, Zap, Sparkles, 
   ArrowUp, BookOpen, LayoutDashboard, Settings, 
   User as UserIcon, BrainCircuit, ChevronLeft,
-  CheckCircle2, Loader2, Share2, AlertCircle, X, Lock, Palette
+  CheckCircle2, Loader2, Share2, AlertCircle, X, Lock, Palette, UploadCloud, Activity
 } from 'lucide-react'
 
 import { exportToWord } from '@/lib/export'
 import Editor from '@/components/editor'
+import { RiskRadar } from '@/components/risk-radar' 
 import { Button } from '@/components/ui/button'
 import { LEGAL_TEMPLATES } from '@/lib/templates' 
 import Link from 'next/link'
@@ -24,7 +26,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
 interface HistoryItem { id: number; title: string; content: string; created_at: string; }
 interface Message { role: 'user' | 'assistant'; content: string; }
 
-// --- ✨ 修复：完整的设置弹窗组件 ---
+// --- 完整的 Settings Modal 组件 (无删减) ---
 const SettingsModal = ({ isOpen, onClose, user }: { isOpen: boolean; onClose: () => void; user: User | null }) => {
   if (!isOpen) return null;
   
@@ -203,6 +205,13 @@ function MainContent() {
   const [isExporting, setIsExporting] = useState(false)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
+  // ✨ Risk Radar State
+  const [riskData, setRiskData] = useState<any>(null)
+  const [isRiskScanning, setIsRiskScanning] = useState(false)
+
+  // ✨ Upload State
+  const [isUploading, setIsUploading] = useState(false)
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => setUser(user))
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null))
@@ -251,9 +260,7 @@ function MainContent() {
     setSaveStatus('saved')
   }
 
-  const switchMode = (newMode: 'draft' | 'polish') => {
-    setMode(newMode)
-  }
+  const switchMode = (newMode: 'draft' | 'polish') => { setMode(newMode) }
 
   const fetchHistory = async () => {
     if (!user) return
@@ -316,17 +323,83 @@ function MainContent() {
     setPolishMessages(prev => [...prev, { role: 'assistant', content: `已恢复历史版本：${item.title}` }])
   }
 
+  // ✨ P0: 上传逻辑
+  const onDrop = async (acceptedFiles: File[]) => {
+    const file = acceptedFiles[0]
+    if (!file) return
+    
+    setIsUploading(true)
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/upload`, {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      
+      if (data.status === 'success') {
+        handleEditorChange(data.content)
+        setSaveStatus('saved')
+        setMode('polish')
+        showToast("文档解析成功！", "success")
+        // 自动触发一条欢迎语
+        setPolishMessages(prev => [...prev, { role: 'assistant', content: "文档已导入。您可以点击上方的「体检」按钮进行风险分析。" }])
+      } else {
+        showToast("解析失败，请检查文件格式", "error")
+      }
+    } catch (e) {
+      showToast("上传出错", "error")
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
+    onDrop, 
+    accept: { 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] },
+    maxFiles: 1
+  })
+
+  // ✨ P2: 风险体检逻辑
+  const handleRiskScan = async () => {
+    if (!content || content.length < 50) {
+        showToast("文档内容太少，无法分析", "error")
+        return
+    }
+    
+    setIsRiskScanning(true)
+    setMode('polish') // 强制切换到润色模式展示结果
+    
+    try {
+        const res = await fetch(`${API_BASE_URL}/api/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ current_doc: content, mode: 'risk_score', messages: [] })
+        })
+        const data = await res.json()
+        setRiskData(data) // 保存数据，渲染 Radar
+        
+        // 在对话框里也加一条记录
+        setPolishMessages(prev => [...prev, { role: 'assistant', content: "✅ 风险体检已完成，结果如上图所示。" }])
+        
+    } catch (e) {
+        showToast("分析失败，请重试", "error")
+    } finally {
+        setIsRiskScanning(false)
+    }
+  }
+
   const handleSend = async () => {
     if (!input.trim() || isAnalyzing) return
     const newMsg: Message = { role: 'user', content: input }
     const setCurrentMessages = mode === 'draft' ? setDraftMessages : setPolishMessages
+    const currentMessages = mode === 'draft' ? draftMessages : polishMessages
     
-    // UI 立即更新用户消息
     setCurrentMessages(prev => [...prev, newMsg])
     setInput('')
     setIsAnalyzing(true)
-    
-    // 占位符
     setCurrentMessages(prev => [...prev, { role: 'assistant', content: '' }])
 
     try {
@@ -334,8 +407,7 @@ function MainContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-            // 每次请求只带当前模式的上下文
-            messages: mode === 'draft' ? [...draftMessages, newMsg] : [...polishMessages, newMsg], 
+            messages: [...currentMessages, newMsg], 
             current_doc: content, 
             mode: mode, 
             user_id: user?.id 
@@ -353,29 +425,40 @@ function MainContent() {
         done = doneReading
         const chunkValue = decoder.decode(value, { stream: true })
         fullText += chunkValue
-        
         setCurrentMessages(prev => {
             const newArr = [...prev]
             newArr[newArr.length - 1] = { role: 'assistant', content: fullText }
             return newArr
         })
       }
-      handleEditorChange(fullText) 
+      if (mode === 'draft') handleEditorChange(fullText) 
     } catch (error) {
-        setCurrentMessages(prev => [...prev, { role: 'assistant', content: "⚠️ 网络请求失败，请检查服务状态。" }])
+        setCurrentMessages(prev => [...prev, { role: 'assistant', content: "⚠️ 网络请求失败。" }])
     } finally { setIsAnalyzing(false) }
   }
 
   return (
     <div className="flex h-screen w-full bg-[#FAFAFA] text-slate-900 font-sans overflow-hidden">
       
-      {/* 1. 侧边栏 */}
+      {/* 1. 侧边栏 (带上传) */}
       <aside className="w-[60px] bg-[#1C1C1E] flex flex-col items-center py-6 gap-6 z-40 shrink-0 border-r border-white/5">
         <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/30">
           <ShieldCheck className="w-6 h-6 text-white" />
         </div>
         <nav className="flex-1 flex flex-col gap-6 w-full items-center pt-6">
            <NavItem icon={<LayoutDashboard />} label="工作台" active />
+           
+           {/* ✨ Upload Button */}
+           <div {...getRootProps()} className="cursor-pointer group relative flex justify-center w-full outline-none">
+                <input {...getInputProps()} />
+                <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300", isDragActive ? "bg-indigo-500 text-white" : "text-slate-400 hover:text-white hover:bg-white/10")}>
+                    {isUploading ? <Loader2 className="animate-spin w-5 h-5"/> : <UploadCloud className="w-5 h-5"/>}
+                </div>
+                <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-black text-white text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none whitespace-nowrap shadow-xl border border-white/20">
+                    导入 Word
+                </span>
+           </div>
+
            <Link href="/templates"><NavItem icon={<BookOpen />} label="模版" /></Link>
            <NavItem icon={<History />} label="历史" onClick={() => setShowHistory(true)} />
         </nav>
@@ -389,7 +472,7 @@ function MainContent() {
         </div>
       </aside>
 
-      {/* 2. AI 面板 */}
+      {/* 2. AI 面板 (带雷达图) */}
       <div className="w-[360px] flex flex-col bg-white border-r border-slate-200 z-30 shadow-[4px_0_24px_rgba(0,0,0,0.02)] relative">
          
          <AnimatePresence>
@@ -418,6 +501,16 @@ function MainContent() {
                </div>
                <span className="font-bold text-slate-800 text-sm">LawLens AI</span>
             </div>
+            {/* ✨ Risk Scan Button (Small) */}
+            <button 
+                onClick={handleRiskScan} 
+                disabled={isRiskScanning}
+                className="flex items-center gap-1 bg-indigo-50 text-indigo-600 px-2 py-1 rounded text-[10px] font-bold hover:bg-indigo-100 transition-colors disabled:opacity-50"
+                title="全身体检"
+            >
+                {isRiskScanning ? <Loader2 className="animate-spin w-3 h-3"/> : <Activity className="w-3 h-3" />}
+                体检
+            </button>
             <div className="flex bg-slate-100 p-1 rounded-lg scale-90 origin-right">
                 <button onClick={() => switchMode('draft')} className={cn("px-3 py-1 text-[11px] font-bold rounded-[4px] transition-all", mode === 'draft' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>起草</button>
                 <button onClick={() => switchMode('polish')} className={cn("px-3 py-1 text-[11px] font-bold rounded-[4px] transition-all", mode === 'polish' ? "bg-white text-purple-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>润色</button>
@@ -426,18 +519,28 @@ function MainContent() {
 
          {/* Chat Area */}
          <div className="flex-1 overflow-y-auto p-5 bg-[#FAFAFA] scroll-smooth relative">
-            {messages.length === 0 && (
+            
+            {/* ✨ 雷达图展示区 */}
+            {riskData && (
+                <RiskRadar 
+                    data={riskData.dimensions} 
+                    score={riskData.total_score} 
+                    summary={riskData.summary} 
+                />
+            )}
+
+            {messages.length === 0 && !riskData && (
                 <div className="mt-8 text-center animate-in fade-in slide-in-from-bottom-4 duration-500">
                     <h3 className="text-slate-900 font-bold mb-2 text-sm">
                         {mode === 'draft' ? 'AI 智能起草' : 'AI 审查润色'}
                     </h3>
                     <p className="text-xs text-slate-500 mb-6 px-8 leading-relaxed">
                         {mode === 'draft' 
-                            ? '描述您的需求，AI 将引用真实案例为您从零起草文书。' 
-                            : '已加载文档内容。AI 可以帮您审查风险、修改条款或优化措辞。'}
+                            ? '描述需求，AI 将引用案例为您从零起草。' 
+                            : '已加载文档。尝试点击上方「体检」按钮进行风险分析。'}
                     </p>
                     <div className="space-y-2.5 px-2">
-                        {(mode === 'draft' ? ['起草一份房屋租赁合同', '生成催款律师函'] : ['审查本合同的法律风险', '优化当前选中的条款', '将“违约金”调整为合法范围']).map((t, i) => (
+                        {(mode === 'draft' ? ['起草一份房屋租赁合同', '生成催款律师函'] : ['优化当前选中的条款', '将“违约金”调整为合法范围']).map((t, i) => (
                             <button key={i} onClick={() => setInput(t)} 
                                 className="w-full text-left px-4 py-2.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-600 hover:border-indigo-400 hover:shadow-md transition-all group flex items-center justify-between">
                                 <span>{t}</span>
@@ -447,6 +550,7 @@ function MainContent() {
                     </div>
                 </div>
             )}
+
             <div className="space-y-6">
                 {messages.map((m, i) => (
                     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -463,9 +567,7 @@ function MainContent() {
                 {isAnalyzing && (
                     <div className="flex gap-2 items-center text-xs text-slate-400 px-2 mt-2">
                         <Sparkles className="w-3.5 h-3.5 animate-pulse text-indigo-500" /> 
-                        <span className="animate-pulse">
-                            {mode === 'draft' ? '正在检索类案与法条...' : '正在分析文档风险...'}
-                        </span>
+                        <span className="animate-pulse">AI 正在思考...</span>
                     </div>
                 )}
                 <div ref={chatEndRef} />
@@ -524,7 +626,6 @@ function MainContent() {
          </div>
       </main>
 
-      {/* History Slide Over */}
       <AnimatePresence>
         {showHistory && (
           <>
@@ -565,6 +666,8 @@ function MainContent() {
 function NavItem({ icon, label, active, onClick }: any) {
     return (
         <div className="group relative flex justify-center w-full cursor-pointer" onClick={onClick}>
+            {/* Input 容器占满 */}
+            {onClick ? <div onClick={onClick} className="absolute inset-0 z-10" /> : null}
             <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-300", active ? "bg-white text-black" : "text-slate-500 hover:text-slate-200 hover:bg-white/10")}>
                 {icon}
             </div>
