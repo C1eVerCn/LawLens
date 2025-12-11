@@ -1,3 +1,6 @@
+// --------------------------------------------------------
+// 3. components/editor.tsx (全量中文版)
+// --------------------------------------------------------
 'use client'
 
 import { useEditor, EditorContent, BubbleMenu, Extension, ReactRenderer } from '@tiptap/react'
@@ -61,7 +64,7 @@ const generateDiffHtml = (oldText: string, newText: string) => {
 }
 
 // ==========================================
-// 1. Slash Command 配置 (完整保留)
+// 1. Slash Command 配置 (中文版)
 // ==========================================
 const CommandList = forwardRef((props: any, ref) => {
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -153,10 +156,10 @@ const getSuggestionItems = ({ query }: { query: string }) => {
         }
       },
     },
-    { title: '一级标题', desc: '大标题', icon: <Heading1 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 1 }).run() },
-    { title: '二级标题', desc: '中标题', icon: <Heading2 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 2 }).run() },
-    { title: '三级标题', desc: '小标题', icon: <Heading3 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 3 }).run() },
-    { title: '引用块', desc: '引用重点内容', icon: <Quote className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleBlockquote().run() },
+    { title: '一级标题', desc: '主要章节标题', icon: <Heading1 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 1 }).run() },
+    { title: '二级标题', desc: '次级章节标题', icon: <Heading2 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 2 }).run() },
+    { title: '三级标题', desc: '小节标题', icon: <Heading3 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 3 }).run() },
+    { title: '引用块', desc: '强调或引用法律条文', icon: <Quote className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleBlockquote().run() },
     { title: '无序列表', desc: '圆点项目符号', icon: <List className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleBulletList().run() },
     { title: '有序列表', desc: '数字编号列表', icon: <ListOrdered className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleOrderedList().run() },
     { title: '分割线', desc: '视觉分隔符', icon: <Minus className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setHorizontalRule().run() },
@@ -555,7 +558,7 @@ export default function Editor({ content, onChange, onStatsChange, className }: 
                     <div className="p-5 flex flex-col gap-3">
                         <div className="flex items-center gap-2.5 text-indigo-300 text-[11px] font-bold uppercase tracking-widest opacity-80">
                             <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-                            AI Generating...
+                            AI 正在润色...
                         </div>
                         <div className="text-[15px] leading-relaxed text-white/90 min-h-[40px] max-h-[300px] overflow-y-auto font-serif">
                             {aiResult}
@@ -570,11 +573,11 @@ export default function Editor({ content, onChange, onStatsChange, className }: 
                         <div className="p-5 bg-white/5 border-b border-white/5 max-h-[300px] overflow-y-auto">
                             <div className="flex items-center justify-between mb-2">
                                 <span className="text-[10px] text-white/40 font-bold uppercase tracking-wider flex items-center gap-1">
-                                    <GitCompare size={12} /> Redlining View
+                                    <GitCompare size={12} /> 修订对比视图
                                 </span>
                                 <div className="flex gap-2 text-[10px]">
-                                    <span className="flex items-center gap-1 text-red-400"><span className="w-2 h-2 bg-red-500/20 border border-red-500 rounded-sm line-through decoration-red-500">A</span> Deleted</span>
-                                    <span className="flex items-center gap-1 text-green-400"><span className="w-2 h-2 bg-green-500/20 border border-green-500 rounded-sm">B</span> Added</span>
+                                    <span className="flex items-center gap-1 text-red-400"><span className="w-2 h-2 bg-red-500/20 border border-red-500 rounded-sm line-through decoration-red-500">A</span> 删除</span>
+                                    <span className="flex items-center gap-1 text-green-400"><span className="w-2 h-2 bg-green-500/20 border border-green-500 rounded-sm">B</span> 新增</span>
                                 </div>
                             </div>
                             {/* ✨ 渲染 Diff 结果 */}
@@ -585,13 +588,13 @@ export default function Editor({ content, onChange, onStatsChange, className }: 
                         </div>
                         <div className="flex items-center p-2 gap-2 bg-black/40">
                             <button onClick={applyAiResult} className="flex-1 flex items-center justify-center gap-2 h-9 rounded-xl hover:bg-green-500/20 active:bg-green-500/30 text-green-400 text-xs font-bold transition-all shadow-sm">
-                                <Check size={14} /> Accept
+                                <Check size={14} /> 采纳
                             </button>
                             <button onClick={() => navigator.clipboard.writeText(aiResult)} className="flex-1 flex items-center justify-center gap-2 h-9 rounded-xl hover:bg-white/10 active:bg-white/20 text-white/70 text-xs font-bold transition-all">
-                                <Copy size={14} /> Copy
+                                <Copy size={14} /> 复制
                             </button>
                             <button onClick={discardAiResult} className="flex-1 flex items-center justify-center gap-2 h-9 rounded-xl hover:bg-red-500/20 active:bg-red-500/30 text-red-300 hover:text-red-200 text-xs font-bold transition-all">
-                                <X size={14} /> Discard
+                                <X size={14} /> 放弃
                             </button>
                         </div>
                     </div>
