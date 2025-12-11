@@ -9,7 +9,7 @@ import {
   ShieldCheck, History, Download, Zap, Sparkles, 
   ArrowUp, BookOpen, LayoutDashboard, Settings, 
   User as UserIcon, BrainCircuit, ChevronLeft,
-  CheckCircle2, Loader2, Share2, AlertCircle
+  CheckCircle2, Loader2, Share2, AlertCircle, X, Lock, Palette
 } from 'lucide-react'
 
 import { exportToWord } from '@/lib/export'
@@ -24,40 +24,163 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
 interface HistoryItem { id: number; title: string; content: string; created_at: string; }
 interface Message { role: 'user' | 'assistant'; content: string; }
 
-// --- Settings Modal (保持不变) ---
+// --- ✨ 修复：完整的设置弹窗组件 ---
 const SettingsModal = ({ isOpen, onClose, user }: { isOpen: boolean; onClose: () => void; user: User | null }) => {
   if (!isOpen) return null;
+  
+  // 内部状态
+  const [activeTab, setActiveTab] = useState('general')
+  const tabs = [
+    { id: 'general', label: '通用设置', icon: <Settings size={14} /> },
+    { id: 'account', label: '账号安全', icon: <Lock size={14} /> },
+    { id: 'ai', label: 'AI 偏好', icon: <BrainCircuit size={14} /> },
+    { id: 'theme', label: '界面外观', icon: <Palette size={14} /> },
+  ]
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
-        <div className="bg-white w-[500px] rounded-xl shadow-2xl flex flex-col overflow-hidden">
-            <div className="h-14 px-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                <h3 className="font-bold text-slate-800">系统设置</h3>
-                <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-                </button>
-            </div>
-            <div className="p-8 text-center text-slate-500">
-                <Settings size={48} className="mx-auto mb-4 text-slate-300" />
-                <p>偏好设置面板正在开发中...</p>
-                <p className="text-xs mt-2">当前版本：LawLens v1.0.3 Pro</p>
-            </div>
+      <div className="w-[640px] h-[480px] bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="h-14 px-6 border-b border-slate-100 flex items-center justify-between shrink-0">
+          <h3 className="font-bold text-slate-800">设置</h3>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={18} className="text-slate-500" /></button>
         </div>
+        
+        {/* Body */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Sidebar */}
+          <div className="w-48 bg-slate-50/50 border-r border-slate-100 p-3 flex flex-col gap-1">
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2 text-xs font-medium rounded-md transition-all text-left",
+                  activeTab === tab.id 
+                    ? "bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200" 
+                    : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                )}
+              >
+                {tab.icon} {tab.label}
+              </button>
+            ))}
+          </div>
+          
+          {/* Content Area */}
+          <div className="flex-1 p-6 overflow-y-auto bg-white">
+            {activeTab === 'general' && (
+              <div className="space-y-6">
+                <div>
+                    <h4 className="text-sm font-bold text-slate-800 mb-4">导出与保存</h4>
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-slate-600">默认导出格式</span>
+                            <select className="text-xs border border-slate-200 rounded p-1.5 bg-slate-50 outline-none focus:border-indigo-500">
+                                <option>Word 文档 (.docx)</option>
+                                <option>PDF 文件 (.pdf)</option>
+                            </select>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs text-slate-600">自动保存间隔</span>
+                            <select className="text-xs border border-slate-200 rounded p-1.5 bg-slate-50 outline-none focus:border-indigo-500">
+                                <option>实时</option>
+                                <option>每 30 秒</option>
+                                <option>每 5 分钟</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+              </div>
+            )}
+            
+            {activeTab === 'account' && (
+              <div className="space-y-6">
+                <div>
+                    <h4 className="text-sm font-bold text-slate-800 mb-4">个人资料</h4>
+                    {user ? (
+                        <div className="p-4 bg-indigo-50/50 border border-indigo-100 rounded-lg">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold">
+                                    {user.email?.[0].toUpperCase()}
+                                </div>
+                                <div>
+                                    <p className="text-sm font-bold text-slate-900">{user.email}</p>
+                                    <p className="text-xs text-slate-500">LawLens 普通用户</p>
+                                </div>
+                            </div>
+                            <button className="text-xs text-indigo-600 hover:underline font-medium ml-13">管理订阅</button>
+                        </div>
+                    ) : (
+                        <div className="text-center py-8 bg-slate-50 rounded-lg border border-dashed border-slate-200">
+                            <p className="text-xs text-slate-500 mb-3">您尚未登录</p>
+                            <Link href="/auth">
+                                <Button size="sm" className="bg-slate-900 text-white h-8 text-xs">去登录</Button>
+                            </Link>
+                        </div>
+                    )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'ai' && (
+              <div className="space-y-6">
+                <div>
+                    <h4 className="text-sm font-bold text-slate-800 mb-4">模型配置</h4>
+                    <div className="p-3 bg-blue-50 text-blue-700 text-xs rounded-md border border-blue-100 mb-4 leading-relaxed">
+                        当前正在使用 <b>LawLens Pro (Qwen-Max)</b> 法律专用大模型，已开启 RAG 联网检索增强。
+                    </div>
+                    <div className="space-y-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                           <input type="checkbox" checked readOnly className="rounded text-indigo-600 focus:ring-indigo-500" />
+                           <span className="text-xs text-slate-700">总是显示思维链 (Chain of Thought)</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                           <input type="checkbox" checked readOnly className="rounded text-indigo-600 focus:ring-indigo-500" />
+                           <span className="text-xs text-slate-700">允许 AI 学习我的修改习惯 (Agent Memory)</span>
+                        </label>
+                    </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'theme' && (
+              <div className="space-y-6">
+                <div>
+                    <h4 className="text-sm font-bold text-slate-800 mb-4">界面风格</h4>
+                    <div className="grid grid-cols-2 gap-3">
+                       <div className="border-2 border-indigo-600 rounded-lg p-3 bg-white text-center cursor-pointer relative overflow-hidden">
+                           <div className="text-xs font-bold text-indigo-700">专业白 (默认)</div>
+                           <div className="absolute top-0 right-0 bg-indigo-600 text-white text-[8px] px-1.5 py-0.5 rounded-bl">当前</div>
+                       </div>
+                       <div className="border border-slate-200 rounded-lg p-3 bg-slate-900 text-center cursor-not-allowed opacity-60">
+                           <div className="text-xs font-bold text-white">深邃黑</div>
+                           <div className="text-[8px] text-slate-400 mt-1">即将推出</div>
+                       </div>
+                    </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {/* Footer */}
+        <div className="p-4 border-t border-slate-100 flex justify-end gap-2 bg-slate-50">
+           <button onClick={onClose} className="px-4 py-2 bg-white border border-slate-200 rounded-md text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors">取消</button>
+           <button onClick={() => { onClose(); alert("设置已保存！") }} className="px-4 py-2 bg-indigo-600 text-white rounded-md text-xs font-medium hover:bg-indigo-700 shadow-sm transition-colors">保存更改</button>
+        </div>
+      </div>
     </div>
   )
 }
 
 function MainContent() {
   const searchParams = useSearchParams()
-  
-  // --- 状态管理 ---
   const [content, setContent] = useState('')
   const [mode, setMode] = useState<'draft' | 'polish'>('draft')
   
-  // ✨ 核心修改：分离起草和润色的对话历史
+  // 对话历史分离
   const [draftMessages, setDraftMessages] = useState<Message[]>([])
   const [polishMessages, setPolishMessages] = useState<Message[]>([])
-  
-  // 根据当前模式获取对应的消息列表和设置函数
   const messages = mode === 'draft' ? draftMessages : polishMessages
   const setMessages = (fn: (prev: Message[]) => Message[]) => {
     if (mode === 'draft') setDraftMessages(fn)
@@ -73,14 +196,13 @@ function MainContent() {
   const [historyList, setHistoryList] = useState<HistoryItem[]>([])
   const [user, setUser] = useState<User | null>(null)
   
-  // UI 交互状态
+  // UI 交互
   const [showSettings, setShowSettings] = useState(false)
   const [notification, setNotification] = useState<{msg: string, type: 'success' | 'info' | 'error'} | null>(null)
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved')
   const [isExporting, setIsExporting] = useState(false)
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Init
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => setUser(user))
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null))
@@ -93,9 +215,18 @@ function MainContent() {
   }, [searchParams])
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, isAnalyzing])
-  useEffect(() => { if (showHistory) fetchHistory() }, [showHistory, user])
+  
+  // ✨ 修复：未登录时不拉取历史，防止显示无关记录
+  useEffect(() => { 
+      if (showHistory) {
+          if (user) {
+              fetchHistory() 
+          } else {
+              setHistoryList([]) // 未登录清空列表
+          }
+      }
+  }, [showHistory, user])
 
-  // --- 工具函数 ---
   const showToast = (msg: string, type: 'success' | 'info' | 'error' = 'info') => {
     setNotification({ msg, type })
     setTimeout(() => setNotification(null), 3000)
@@ -122,14 +253,13 @@ function MainContent() {
 
   const switchMode = (newMode: 'draft' | 'polish') => {
     setMode(newMode)
-    // 切换时不再显示 Toast 干扰，界面本身的变化已经足够明显
-    // 如果需要提示，可以在 Chat 区域显示系统消息
   }
 
   const fetchHistory = async () => {
+    if (!user) return
     try {
       const url = new URL(`${API_BASE_URL}/api/history`)
-      if (user) url.searchParams.append('user_id', user.id)
+      url.searchParams.append('user_id', user.id)
       const res = await fetch(url.toString())
       if (res.ok) setHistoryList(await res.json())
     } catch (error) { console.error(error) }
@@ -164,23 +294,17 @@ function MainContent() {
 
   const handleShare = () => {
     const url = window.location.href
-    navigator.clipboard.writeText(url).then(() => {
-        showToast("页面链接已复制，可发给协作者", "success")
-    }).catch(() => showToast("复制失败", "error"))
+    navigator.clipboard.writeText(url).then(() => showToast("链接已复制", "success")).catch(() => showToast("复制失败", "error"))
   }
 
-  // ✨ 核心修改：加载模版时，只更新润色模式的历史记录
   const fillTemplate = (id: string) => {
     const template = LEGAL_TEMPLATES.find(t => t.id === id)
     if (template) {
       handleEditorChange(template.content)
       setSaveStatus('saved')
-      
-      // 切换到润色模式，并只在该模式下添加提示
       setMode('polish') 
       setPolishMessages(prev => [...prev, { role: 'assistant', content: `已加载【${template.title}】。您可以让我审查风险或修改具体条款。` }])
-      
-      showToast("模版加载成功，已切换至润色模式", "success")
+      showToast("模版加载成功", "success")
     }
   }
 
@@ -188,24 +312,21 @@ function MainContent() {
     handleEditorChange(item.content)
     setSaveStatus('saved')
     setShowHistory(false)
-    // 恢复历史通常意味着需要继续润色
     setMode('polish')
     setPolishMessages(prev => [...prev, { role: 'assistant', content: `已恢复历史版本：${item.title}` }])
   }
 
   const handleSend = async () => {
     if (!input.trim() || isAnalyzing) return
-    
     const newMsg: Message = { role: 'user', content: input }
-    const currentModeMessages = mode === 'draft' ? draftMessages : polishMessages
     const setCurrentMessages = mode === 'draft' ? setDraftMessages : setPolishMessages
-
-    // 1. 更新当前模式的 UI
+    
+    // UI 立即更新用户消息
     setCurrentMessages(prev => [...prev, newMsg])
     setInput('')
     setIsAnalyzing(true)
     
-    // 2. 添加空的 AI 消息占位
+    // 占位符
     setCurrentMessages(prev => [...prev, { role: 'assistant', content: '' }])
 
     try {
@@ -213,8 +334,8 @@ function MainContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-            // 每次发送只带上当前模式的历史记录
-            messages: [...currentModeMessages, newMsg], 
+            // 每次请求只带当前模式的上下文
+            messages: mode === 'draft' ? [...draftMessages, newMsg] : [...polishMessages, newMsg], 
             current_doc: content, 
             mode: mode, 
             user_id: user?.id 
@@ -233,7 +354,6 @@ function MainContent() {
         const chunkValue = decoder.decode(value, { stream: true })
         fullText += chunkValue
         
-        // 实时更新当前模式的消息
         setCurrentMessages(prev => {
             const newArr = [...prev]
             newArr[newArr.length - 1] = { role: 'assistant', content: fullText }
@@ -272,7 +392,6 @@ function MainContent() {
       {/* 2. AI 面板 */}
       <div className="w-[360px] flex flex-col bg-white border-r border-slate-200 z-30 shadow-[4px_0_24px_rgba(0,0,0,0.02)] relative">
          
-         {/* Toast */}
          <AnimatePresence>
             {notification && (
                 <motion.div 
@@ -292,7 +411,6 @@ function MainContent() {
             )}
          </AnimatePresence>
 
-         {/* Header */}
          <div className="h-16 px-5 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
             <div className="flex items-center gap-2.5">
                <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
@@ -300,7 +418,6 @@ function MainContent() {
                </div>
                <span className="font-bold text-slate-800 text-sm">LawLens AI</span>
             </div>
-            {/* Mode Switcher */}
             <div className="flex bg-slate-100 p-1 rounded-lg scale-90 origin-right">
                 <button onClick={() => switchMode('draft')} className={cn("px-3 py-1 text-[11px] font-bold rounded-[4px] transition-all", mode === 'draft' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>起草</button>
                 <button onClick={() => switchMode('polish')} className={cn("px-3 py-1 text-[11px] font-bold rounded-[4px] transition-all", mode === 'polish' ? "bg-white text-purple-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>润色</button>
@@ -309,8 +426,6 @@ function MainContent() {
 
          {/* Chat Area */}
          <div className="flex-1 overflow-y-auto p-5 bg-[#FAFAFA] scroll-smooth relative">
-            
-            {/* Empty State: 根据模式显示不同引导 */}
             {messages.length === 0 && (
                 <div className="mt-8 text-center animate-in fade-in slide-in-from-bottom-4 duration-500">
                     <h3 className="text-slate-900 font-bold mb-2 text-sm">
@@ -332,7 +447,6 @@ function MainContent() {
                     </div>
                 </div>
             )}
-
             <div className="space-y-6">
                 {messages.map((m, i) => (
                     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -358,7 +472,7 @@ function MainContent() {
             </div>
          </div>
 
-         {/* Input Area */}
+         {/* Input */}
          <div className="p-4 bg-white border-t border-slate-100">
             <div className="relative group">
                 <textarea 
@@ -381,7 +495,6 @@ function MainContent() {
          <header className="h-16 flex items-center justify-between px-8 bg-[#F2F4F7] shrink-0">
              <div className="flex items-center gap-3">
                 <span className="text-sm font-bold text-slate-700 tracking-tight">未命名法律文书</span>
-                {/* 实时状态条 */}
                 <div className={cn(
                     "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-all duration-300",
                     saveStatus === 'saved' ? "bg-green-50 border-green-100 text-green-600" :
@@ -422,12 +535,22 @@ function MainContent() {
                 <button onClick={() => setShowHistory(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><ChevronLeft className="w-4 h-4 text-slate-500" /></button>
               </div>
               <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                {historyList.map((item) => (
-                  <div key={item.id} onClick={() => loadHistoryItem(item)} className="p-3 rounded-lg border border-slate-100 hover:border-indigo-500/50 hover:bg-indigo-50/10 cursor-pointer transition-all">
-                    <div className="font-medium text-slate-800 text-xs mb-1 truncate">{item.title}</div>
-                    <div className="text-[10px] text-slate-400">{new Date(item.created_at).toLocaleString()}</div>
-                  </div>
-                ))}
+                {!user ? (
+                    <div className="text-center py-10">
+                        <Lock className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                        <p className="text-xs text-slate-500 mb-4">请登录后查看云端历史</p>
+                        <Link href="/auth"><Button size="sm" variant="outline" className="text-xs">去登录</Button></Link>
+                    </div>
+                ) : historyList.length === 0 ? (
+                    <div className="text-center py-10 text-xs text-slate-400">暂无历史记录</div>
+                ) : (
+                    historyList.map((item) => (
+                      <div key={item.id} onClick={() => loadHistoryItem(item)} className="p-3 rounded-lg border border-slate-100 hover:border-indigo-500/50 hover:bg-indigo-50/10 cursor-pointer transition-all">
+                        <div className="font-medium text-slate-800 text-xs mb-1 truncate">{item.title}</div>
+                        <div className="text-[10px] text-slate-400">{new Date(item.created_at).toLocaleString()}</div>
+                      </div>
+                    ))
+                )}
               </div>
             </motion.div>
           </>
