@@ -2,45 +2,63 @@ import { asBlob } from 'html-docx-js-typescript'
 import { saveAs } from 'file-saver'
 
 export const exportToWord = async (htmlContent: string, filename: string = '法律文书.docx') => {
-  // 1. 构建一个完整的 HTML 结构，包含针对 Word 优化的 CSS
-  // Word 对 CSS 的支持有限，但 font-family 和 font-size 是支持的
+  // 1. 构建一个完整的 HTML 结构
+  // 我们增加了专门针对 Word 解析的 CSS，比如 table 的边框处理
   const fullHtml = `
     <!DOCTYPE html>
-    <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+    <html lang="zh-CN">
     <head>
-      <meta charset="utf-8">
+      <meta charset="UTF-8">
       <title>${filename}</title>
       <style>
-        body {
-          font-family: 'SimSun', 'Songti SC', serif; /* 强制宋体 */
-          font-size: 16px; /* 对应 Word 小三/四号 */
-          line-height: 1.5;
+        @page {
+          size: A4;
+          margin: 1in; /* 标准 A4 页边距 */
         }
-        p {
-          margin-bottom: 12pt;
-          text-align: justify;
+        body {
+          font-family: "SimSun", "Songti SC", serif; /* 核心：宋体 */
+          font-size: 12pt; /* 正文小四 */
+          line-height: 1.5;
+          color: #000;
         }
         h1 {
-          font-size: 24px;
+          font-size: 22pt; /* 二号 */
           font-weight: bold;
           text-align: center;
-          margin-top: 24pt;
-          margin-bottom: 24pt;
+          margin: 24pt 0;
         }
         h2 {
-          font-size: 18px;
+          font-size: 16pt; /* 三号 */
           font-weight: bold;
-          margin-top: 18pt;
-          margin-bottom: 12pt;
+          margin: 18pt 0 12pt 0;
         }
+        h3 {
+          font-size: 14pt; /* 四号 */
+          font-weight: bold;
+          margin: 14pt 0 12pt 0;
+        }
+        p {
+          margin-bottom: 10pt;
+          text-align: justify;
+          text-justify: inter-ideograph;
+        }
+        /* 表格样式优化，确保 Word 能显示边框 */
         table {
           width: 100%;
           border-collapse: collapse;
-          margin-bottom: 12pt;
+          margin: 12pt 0;
         }
         td, th {
-          border: 1px solid #000;
-          padding: 8px;
+          border: 1px solid #000; /* 纯黑边框 */
+          padding: 8px 12px;
+          vertical-align: top;
+        }
+        blockquote {
+          border-left: 3px solid #666;
+          padding-left: 10px;
+          margin-left: 0;
+          color: #666;
+          background-color: #f5f5f5;
         }
       </style>
     </head>
@@ -52,17 +70,19 @@ export const exportToWord = async (htmlContent: string, filename: string = '法�
 
   try {
     // 2. 转换为 Word Blob
-    // @ts-ignore (这个库的类型定义有时候会报错，忽略即可)
+    // margins: 1440 twips = 1 inch (Word 标准)
     const blob = await asBlob(fullHtml, {
       orientation: 'portrait',
-      margins: { top: 720, right: 720, bottom: 720, left: 720 } // 模拟页边距
+      margins: { top: 1440, right: 1440, bottom: 1440, left: 1440 } 
     })
     
     // 3. 触发下载
     saveAs(blob as Blob, filename)
+    return true // 返回成功状态
     
   } catch (error) {
-    console.error("导出失败:", error)
-    alert("导出失败，请检查浏览器兼容性")
+    console.error("导出 Word 失败:", error)
+    alert("导出失败，请重试或检查浏览器兼容性")
+    return false
   }
 }

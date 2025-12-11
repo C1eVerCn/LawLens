@@ -20,7 +20,7 @@ import Suggestion from '@tiptap/suggestion'
 import tippy from 'tippy.js'
 import 'tippy.js/dist/tippy.css'
 
-import { useEffect, useState,  useImperativeHandle, forwardRef, useLayoutEffect } from 'react'
+import { useEffect, useState, useImperativeHandle, forwardRef, useRef } from 'react'
 import { cn } from "@/lib/utils"
 import { 
   Bold, Italic, Underline as UnderlineIcon, Strikethrough,
@@ -28,12 +28,15 @@ import {
   List, ListOrdered, Undo, Redo, Highlighter, 
   Table as TableIcon, Quote, Sparkles, Loader2, Minus, 
   Type, Cloud, ChevronDown, Plus, Minus as MinusIcon,
-  Heading1, Heading2, Heading3, FileText
+  Heading1, Heading2, Heading3, Check, X, Copy, Wand2,
+  MoreHorizontal
 } from 'lucide-react'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
 
-// --- 1. 斜杠菜单组件 (Command List) ---
+// ==========================================
+// 1. Slash Command 配置 (UI 升级版)
+// ==========================================
 const CommandList = forwardRef((props: any, ref) => {
   const [selectedIndex, setSelectedIndex] = useState(0)
 
@@ -63,104 +66,78 @@ const CommandList = forwardRef((props: any, ref) => {
   }))
 
   return (
-    <div className="bg-white rounded-lg shadow-xl border border-slate-200 overflow-hidden min-w-[240px] p-1.5 animate-in fade-in zoom-in-95 duration-150">
-      <div className="text-[10px] font-bold text-slate-400 px-2 py-1 uppercase tracking-wider mb-1">基础块</div>
-      {props.items.map((item: any, index: number) => (
-        <button
-          key={index}
-          className={cn(
-            "flex items-center gap-3 w-full px-2 py-2 text-sm text-slate-700 rounded-[6px] transition-colors text-left",
-            index === selectedIndex ? "bg-indigo-50 text-indigo-700" : "hover:bg-slate-50"
-          )}
-          onClick={() => selectItem(index)}
-        >
-          <div className={cn(
-            "flex items-center justify-center w-8 h-8 rounded border bg-white",
-            index === selectedIndex ? "border-indigo-200" : "border-slate-200"
-          )}>
-            {item.icon}
-          </div>
-          <div className="flex flex-col">
-             <span className="font-medium">{item.title}</span>
-             <span className="text-[10px] text-slate-400 font-normal">{item.desc}</span>
-          </div>
-        </button>
-      ))}
+    // ✨ Vision Pro 风格容器：深色磨砂 + 细腻边框 + 深度阴影
+    <div className="bg-black/70 backdrop-blur-2xl rounded-xl shadow-[0_20px_50px_-12px_rgba(0,0,0,0.5)] border border-white/10 overflow-hidden min-w-[280px] p-2 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/5">
+      <div className="text-[10px] font-bold text-white/40 px-3 py-1.5 uppercase tracking-widest mb-1 select-none flex items-center justify-between">
+        <span>AI & 基础指令</span>
+        <span className="text-[9px] bg-white/10 px-1.5 py-0.5 rounded text-white/50">TAB 切换</span>
+      </div>
+      
+      <div className="max-h-[320px] overflow-y-auto pr-1 scrollbar-none">
+        {props.items.map((item: any, index: number) => (
+          <button
+            key={index}
+            className={cn(
+              "flex items-center gap-3 w-full px-3 py-2.5 text-sm rounded-lg transition-all duration-200 text-left group",
+              index === selectedIndex 
+                ? "bg-white/20 text-white shadow-sm backdrop-brightness-150" // 选中态：高亮玻璃
+                : "text-white/70 hover:bg-white/5 hover:text-white" // 默认态
+            )}
+            onClick={() => selectItem(index)}
+            onMouseEnter={() => setSelectedIndex(index)}
+          >
+            {/* 图标容器：选中时反色 (白底黑标)，非常有质感 */}
+            <div className={cn(
+              "flex items-center justify-center w-8 h-8 rounded-[8px] border shadow-sm transition-all duration-200",
+              index === selectedIndex 
+                ? "bg-white text-black border-white scale-105" 
+                : "bg-white/5 border-white/10 text-white/60 group-hover:bg-white/10 group-hover:text-white"
+            )}>
+              {item.icon}
+            </div>
+            
+            <div className="flex flex-col gap-0.5">
+               <span className={cn("font-medium tracking-wide", index === selectedIndex ? "text-white" : "text-white/90")}>
+                 {item.title}
+               </span>
+               <span className={cn("text-[10px] line-clamp-1", index === selectedIndex ? "text-white/80" : "text-white/40")}>
+                 {item.desc}
+               </span>
+            </div>
+            
+            {/* 选中时的回车提示 */}
+            {index === selectedIndex && (
+                <div className="ml-auto text-[10px] text-white/50 bg-black/20 px-1.5 py-0.5 rounded">↵</div>
+            )}
+          </button>
+        ))}
+      </div>
     </div>
   )
 })
 CommandList.displayName = 'CommandList'
 
-// --- 2. 配置 Slash Commands ---
 const getSuggestionItems = ({ query }: { query: string }) => {
   return [
     {
-      title: 'AI 续写',
-      desc: '智能分析上下文并续写',
-      icon: <Sparkles className="w-4 h-4 text-purple-500" />,
+      title: 'AI 智能续写',
+      desc: '基于上下文自动生成后续内容',
+      icon: <Sparkles className="w-4 h-4" />, // 去掉颜色，由容器控制颜色
       command: ({ editor, range }: any) => {
-        // 这里触发 AI 续写逻辑，暂时模拟
-        editor.chain().focus().deleteRange(range).insertContent('<blockquote>✨ AI 正在根据上下文续写...</blockquote>').run()
-        // 你可以在这里调用 props 传入的 handleAiDraft 函数
+        editor.chain().focus().deleteRange(range).run()
+        if (editor.storage.aiHandler?.continue) {
+            editor.storage.aiHandler.continue()
+        }
       },
     },
-    {
-      title: '一级标题',
-      desc: '大标题',
-      icon: <Heading1 className="w-4 h-4" />,
-      command: ({ editor, range }: any) => {
-        editor.chain().focus().deleteRange(range).setNode('heading', { level: 1 }).run()
-      },
-    },
-    {
-      title: '二级标题',
-      desc: '中标题',
-      icon: <Heading2 className="w-4 h-4" />,
-      command: ({ editor, range }: any) => {
-        editor.chain().focus().deleteRange(range).setNode('heading', { level: 2 }).run()
-      },
-    },
-    {
-      title: '三级标题',
-      desc: '小标题',
-      icon: <Heading3 className="w-4 h-4" />,
-      command: ({ editor, range }: any) => {
-        editor.chain().focus().deleteRange(range).setNode('heading', { level: 3 }).run()
-      },
-    },
-    {
-      title: '无序列表',
-      desc: '圆点列表',
-      icon: <List className="w-4 h-4" />,
-      command: ({ editor, range }: any) => {
-        editor.chain().focus().deleteRange(range).toggleBulletList().run()
-      },
-    },
-    {
-      title: '有序列表',
-      desc: '数字列表',
-      icon: <ListOrdered className="w-4 h-4" />,
-      command: ({ editor, range }: any) => {
-        editor.chain().focus().deleteRange(range).toggleOrderedList().run()
-      },
-    },
-    {
-      title: '引用块',
-      desc: '引用重点内容',
-      icon: <Quote className="w-4 h-4" />,
-      command: ({ editor, range }: any) => {
-        editor.chain().focus().deleteRange(range).toggleBlockquote().run()
-      },
-    },
-    {
-      title: '分割线',
-      desc: '视觉分隔',
-      icon: <Minus className="w-4 h-4" />,
-      command: ({ editor, range }: any) => {
-        editor.chain().focus().deleteRange(range).setHorizontalRule().run()
-      },
-    },
-  ].filter(item => item.title.toLowerCase().startsWith(query.toLowerCase()))
+    { title: '一级标题', desc: '主要章节标题', icon: <Heading1 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 1 }).run() },
+    { title: '二级标题', desc: '次级章节标题', icon: <Heading2 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 2 }).run() },
+    { title: '三级标题', desc: '小节标题', icon: <Heading3 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 3 }).run() },
+    { title: '引用块', desc: '强调或引用法律条文', icon: <Quote className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleBlockquote().run() },
+    { title: '无序列表', desc: '圆点项目符号', icon: <List className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleBulletList().run() },
+    { title: '有序列表', desc: '数字编号列表', icon: <ListOrdered className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleOrderedList().run() },
+    { title: '分割线', desc: '视觉分隔符', icon: <Minus className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setHorizontalRule().run() },
+  ].filter(item => item.title.toLowerCase().includes(query.toLowerCase()))
 }
 
 const renderSuggestion = () => {
@@ -169,13 +146,8 @@ const renderSuggestion = () => {
 
   return {
     onStart: (props: any) => {
-      component = new ReactRenderer(CommandList, {
-        props,
-        editor: props.editor,
-      })
-
+      component = new ReactRenderer(CommandList, { props, editor: props.editor })
       if (!props.clientRect) return
-
       popup = tippy('body', {
         getReferenceClientRect: props.clientRect,
         appendTo: () => document.body,
@@ -184,7 +156,9 @@ const renderSuggestion = () => {
         interactive: true,
         trigger: 'manual',
         placement: 'bottom-start',
-        zIndex: 9999, // 确保在最上层
+        zIndex: 9999,
+        // 移除默认箭头，更符合现代极简风
+        arrow: false, 
       })
     },
     onUpdate(props: any) {
@@ -210,25 +184,15 @@ const SlashCommand = Extension.create({
   name: 'slashCommand',
   addOptions() {
     return {
-      suggestion: {
-        char: '/',
-        command: ({ editor, range, props }: any) => {
-          props.command({ editor, range })
-        },
-      },
+      suggestion: { char: '/', command: ({ editor, range, props }: any) => props.command({ editor, range }) },
     }
   },
   addProseMirrorPlugins() {
-    return [
-      Suggestion({
-        editor: this.editor,
-        ...this.options.suggestion,
-      }),
-    ]
+    return [Suggestion({ editor: this.editor, ...this.options.suggestion })]
   },
 })
 
-// --- Font Size Extension (保持不变) ---
+// --- 2. Font Size Extension ---
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
     fontSize: {
@@ -264,7 +228,7 @@ const FontSize = Extension.create({
   },
 })
 
-// --- Editor Interface & Constants ---
+// --- 3. Constants & Helpers ---
 interface EditorProps {
   content: string
   onChange: (value: string) => void
@@ -286,7 +250,7 @@ const FONT_SIZE_MAP = [
 ];
 const SORTED_FONT_SIZES = Array.from(new Set(FONT_SIZE_MAP.map(i => parseInt(i.value)))).sort((a, b) => a - b);
 
-// --- MenuBar ---
+// --- 4. MenuBar ---
 const MenuBar = ({ editor }: { editor: any }) => {
   if (!editor) return null
   const btnClass = (isActive: boolean = false) => cn(
@@ -372,7 +336,6 @@ const MenuBar = ({ editor }: { editor: any }) => {
   )
 }
 
-// --- StatusBar ---
 const StatusBar = ({ editor, wordCount }: { editor: any, wordCount: number }) => {
   if (!editor) return null
   return (
@@ -386,30 +349,30 @@ const StatusBar = ({ editor, wordCount }: { editor: any, wordCount: number }) =>
   )
 }
 
-// --- Main Editor ---
+// ==========================================
+// 5. Main Editor Component (Vision Pro Edition)
+// ==========================================
 export default function Editor({ content, onChange, onStatsChange, className }: EditorProps) {
-  const [isPolishing, setIsPolishing] = useState(false)
+  // 核心状态：aiResult (生成的文字), isStreaming (是否在生成), showResult (是否展示结果页)
+  const [aiResult, setAiResult] = useState('') 
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [showResult, setShowResult] = useState(false)
   const [wordCount, setWordCount] = useState(0)
-
+  
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ bulletList: { keepMarks: true }, orderedList: { keepMarks: true }, history: { depth: 100 } }),
-      // ✨ 关键修复：确保 Placeholder 不会挡住光标
       Placeholder.configure({
-        placeholder: ({ node }) => {
-            if (node.type.name === 'heading') return '输入标题...'
-            return "在此输入内容，或输入 '/' 唤起菜单..." 
-        },
+        placeholder: "在此输入内容，或输入 '/' 唤起 AI 助手...",
         emptyEditorClass: 'is-editor-empty relative before:content-[attr(data-placeholder)] before:text-slate-300 before:absolute before:left-0 before:top-0 before:pointer-events-none before:h-full',
       }),
-      // ✨ 关键修复：配置 Slash Command
-      SlashCommand.configure({
-        suggestion: {
-          items: getSuggestionItems,
-          render: renderSuggestion,
-        },
+      SlashCommand.configure({ suggestion: { items: getSuggestionItems, render: renderSuggestion } }),
+      BubbleMenuExtension.configure({ 
+        pluginKey: 'bubbleMenu',
+        shouldShow: ({ from, to }) => {
+            return (from !== to) || isStreaming || showResult
+        }
       }),
-      BubbleMenuExtension.configure({ pluginKey: 'bubbleMenu' }),
       Underline, TextStyle, FontFamily, FontSize, Color, Highlight.configure({ multicolor: true }),
       Link.configure({ openOnClick: false }),
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
@@ -431,64 +394,187 @@ export default function Editor({ content, onChange, onStatsChange, className }: 
     immediatelyRender: false 
   })
 
-  useEffect(() => {
-    if (editor && content && content !== editor.getHTML() && !editor.isFocused) {
-       editor.commands.setContent(content)
-       setWordCount(editor.state.doc.textContent.length)
-    }
-  }, [content, editor])
+  // --- AI 续写逻辑 (Slash Command 调用) ---
+  const handleAiContinuation = async () => {
+    if (!editor) return
+    const { from } = editor.state.selection
+    const contextText = editor.state.doc.textBetween(Math.max(0, from - 2000), from, '\n')
+    
+    // 插入一个带有动画的占位符
+    editor.chain().insertContent(`<span class="text-slate-400 italic animate-pulse">✨ AI 正在构思...</span>`).run()
 
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+            messages: [{ role: 'user', content: `请续写：\n${contextText}` }], 
+            mode: 'draft' 
+        }),
+      })
+
+      if (!response.ok) throw new Error("API Error")
+      
+      // 删除占位符 (粗略估计长度)
+      editor.commands.deleteRange({ from: editor.state.selection.from - 20, to: editor.state.selection.from }) 
+
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      
+      if(reader) {
+          while (true) {
+            const { value, done } = await reader.read()
+            if (done) break
+            const chunk = decoder.decode(value)
+            if (!chunk.includes('<blockquote>')) {
+                editor.commands.insertContent(chunk)
+            }
+          }
+      }
+    } catch (e) { alert("AI 服务异常") }
+  }
+
+  if (editor) { editor.storage.aiHandler = { continue: handleAiContinuation } }
+
+  // --- AI 润色逻辑 (Bubble Menu 调用) ---
   const handleAiPolishSelection = async () => {
     if (!editor) return
     const { from, to } = editor.state.selection
     const selection = editor.state.doc.textBetween(from, to, ' ')
-    if (!selection || selection.length < 2) return
-    setIsPolishing(true)
+    if (!selection) return
+
+    setIsStreaming(true)
+    setShowResult(false)
+    setAiResult('') 
+
     try {
       const response = await fetch(`${API_BASE_URL}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: [{ role: 'user', content: "润色" }], selection, mode: 'selection_polish' }),
       })
+
       if (!response.ok) throw new Error("API Error")
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
+      
       if(reader) {
-          editor.chain().focus().deleteSelection().run() 
           while (true) {
             const { value, done } = await reader.read()
             if (done) break
-            editor.commands.insertContent(decoder.decode(value))
+            const chunk = decoder.decode(value)
+            setAiResult(prev => prev + chunk)
           }
       }
-    } catch (e) { alert("AI 服务连接中断") } 
-    finally { setIsPolishing(false) }
+      setIsStreaming(false)
+      setShowResult(true)
+
+    } catch (e) { 
+        alert("AI 连接失败")
+        setIsStreaming(false)
+    } 
+  }
+
+  // 确认替换
+  const applyAiResult = () => {
+      editor?.chain().focus().deleteSelection().insertContent(aiResult).run()
+      setShowResult(false)
+      setAiResult('')
+  }
+
+  // 放弃修改
+  const discardAiResult = () => {
+      setShowResult(false)
+      setAiResult('')
+      editor?.commands.focus()
   }
 
   return (
     <div className={cn("flex flex-col w-full h-full relative rounded-none overflow-hidden bg-[#F2F4F7]", className)}>
       <MenuBar editor={editor} />
+
+      {/* --- ✨ Vision Pro Style Bubble Menu ✨ --- */}
       {editor && (
-        <BubbleMenu editor={editor} tippyOptions={{ duration: 100, zIndex: 99 }} shouldShow={({ from, to }) => from !== to && !isPolishing}>
-            <div className="flex items-center gap-1 p-1 bg-[#1A1A1A] text-white rounded-[6px] shadow-xl border border-white/10 animate-in fade-in zoom-in duration-150">
-                <button onClick={handleAiPolishSelection} className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold hover:bg-white/10 rounded transition-colors group">
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-400 group-hover:text-white transition-colors" />AI 润色
-                </button>
-                <div className="w-[1px] h-3 bg-white/20 mx-1" />
-                <button onClick={() => editor.chain().focus().toggleBold().run()} className={cn("p-1.5 hover:bg-white/10 rounded", editor.isActive('bold') && 'text-indigo-400')}><Bold size={14} /></button>
-                <button onClick={() => editor.chain().focus().toggleHighlight().run()} className={cn("p-1.5 hover:bg-white/10 rounded", editor.isActive('highlight') && 'text-amber-400')}><Highlighter size={14} /></button>
+        <BubbleMenu 
+            editor={editor} 
+            tippyOptions={{ 
+                duration: 200, 
+                zIndex: 999, 
+                maxWidth: 600,
+                placement: 'bottom-start',
+                offset: [0, 10]
+            }} 
+            shouldShow={({ from, to }) => {
+                return (from !== to) || isStreaming || showResult
+            }}
+        >
+            <div className={cn(
+                "flex flex-col overflow-hidden transition-all duration-300 ease-out origin-top-left",
+                // 核心样式：黑色磨砂玻璃 + 深度阴影 + 细腻边框
+                "bg-black/70 backdrop-blur-2xl border border-white/10 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.5)] rounded-2xl text-white/90 ring-1 ring-white/5",
+                isStreaming || showResult ? "min-w-[400px]" : "min-w-fit"
+            )}>
+                
+                {/* 1. 生成态：流式打字机 */}
+                {isStreaming && (
+                    <div className="p-5 flex flex-col gap-3">
+                        <div className="flex items-center gap-2.5 text-indigo-300 text-[11px] font-bold uppercase tracking-widest opacity-80">
+                            <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+                            AI Generating...
+                        </div>
+                        <div className="text-[15px] leading-relaxed text-white/90 min-h-[40px] max-h-[300px] overflow-y-auto font-serif">
+                            {aiResult}
+                            <span className="inline-block w-1.5 h-4 bg-indigo-400 ml-1 animate-pulse align-middle rounded-full" />
+                        </div>
+                    </div>
+                )}
+
+                {/* 2. 结果态：对比决策 */}
+                {!isStreaming && showResult && (
+                    <div className="flex flex-col">
+                        <div className="p-5 bg-white/5 border-b border-white/5 max-h-[300px] overflow-y-auto">
+                            <div className="text-[10px] text-white/40 mb-2 font-medium tracking-wide uppercase">Suggested Change</div>
+                            <div className="text-[15px] leading-relaxed text-white font-serif whitespace-pre-wrap">{aiResult}</div>
+                        </div>
+                        <div className="flex items-center p-2 gap-2 bg-black/40">
+                            <button onClick={applyAiResult} className="flex-1 flex items-center justify-center gap-2 h-9 rounded-xl hover:bg-white/20 active:bg-white/30 text-white text-xs font-bold transition-all shadow-sm">
+                                <Check size={14} /> 替换
+                            </button>
+                            <button onClick={() => navigator.clipboard.writeText(aiResult)} className="flex-1 flex items-center justify-center gap-2 h-9 rounded-xl hover:bg-white/10 active:bg-white/20 text-white/70 text-xs font-bold transition-all">
+                                <Copy size={14} /> 复制
+                            </button>
+                            <button onClick={discardAiResult} className="flex-1 flex items-center justify-center gap-2 h-9 rounded-xl hover:bg-red-500/20 active:bg-red-500/30 text-red-300 hover:text-red-200 text-xs font-bold transition-all">
+                                <X size={14} /> 放弃
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* 3. 默认态：工具栏 */}
+                {!isStreaming && !showResult && (
+                    <div className="flex items-center gap-1 p-1.5">
+                        <button onClick={handleAiPolishSelection} className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all shadow-sm group border border-white/5">
+                            <Wand2 className="w-3.5 h-3.5 text-indigo-300 group-hover:text-white transition-colors" />
+                            AI 润色
+                        </button>
+                        <div className="w-[1px] h-4 bg-white/10 mx-1.5" />
+                        <button onClick={() => editor.chain().focus().toggleBold().run()} className={cn("p-1.5 hover:bg-white/10 rounded-lg text-white/60 hover:text-white transition-colors", editor.isActive('bold') && 'text-indigo-300 bg-white/10')}><Bold size={15} /></button>
+                        <button onClick={() => editor.chain().focus().toggleItalic().run()} className={cn("p-1.5 hover:bg-white/10 rounded-lg text-white/60 hover:text-white transition-colors", editor.isActive('italic') && 'text-indigo-300 bg-white/10')}><Italic size={15} /></button>
+                        <button onClick={() => editor.chain().focus().toggleStrike().run()} className={cn("p-1.5 hover:bg-white/10 rounded-lg text-white/60 hover:text-white transition-colors", editor.isActive('strike') && 'text-indigo-300 bg-white/10')}><Strikethrough size={15} /></button>
+                        <button onClick={() => editor.chain().focus().toggleHighlight().run()} className={cn("p-1.5 hover:bg-white/10 rounded-lg text-white/60 hover:text-white transition-colors", editor.isActive('highlight') && 'text-amber-300 bg-white/10')}><Highlighter size={15} /></button>
+                    </div>
+                )}
             </div>
         </BubbleMenu>
       )}
+
+      {/* Editor Area */}
       <div className="flex-1 overflow-y-auto cursor-text py-8 px-4 md:px-6 scroll-smooth bg-[#F2F4F7]" onClick={() => editor?.commands.focus()}>
              <EditorContent editor={editor} />
-             {isPolishing && (
-                 <div className="fixed bottom-16 right-12 flex items-center gap-3 px-4 py-2.5 bg-white text-slate-800 text-xs font-bold rounded-lg border border-slate-200 shadow-[0_8px_30px_rgba(0,0,0,0.12)] z-50 animate-in slide-in-from-bottom-4">
-                     <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" /><span>AI 正在思考...</span>
-                 </div>
-             )}
       </div>
+
       <StatusBar editor={editor} wordCount={wordCount} />
+
       <style jsx global>{`
         .ProseMirror { font-family: "SimSun", "Songti SC", "Times New Roman", serif; outline: none; }
         .ProseMirror p.is-editor-empty:first-child::before {
@@ -498,9 +584,9 @@ export default function Editor({ content, onChange, onStatsChange, className }: 
           pointer-events: none;
           height: 0;
         }
-        /* Slash Menu Animation */
-        .tippy-box[data-animation=fade] { opacity: 0; transition-property: opacity; }
-        .tippy-box[data-animation=fade][data-state=visible] { opacity: 1; }
+        /* AI 光标占位符样式 */
+        .ai-cursor { display: inline-block; width: 2px; height: 1em; background-color: #6366f1; animation: blink 1s step-end infinite; }
+        @keyframes blink { 50% { opacity: 0; } }
       `}</style>
     </div>
   )
