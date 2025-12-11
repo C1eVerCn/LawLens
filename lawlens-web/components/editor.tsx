@@ -19,6 +19,8 @@ import { HorizontalRule } from '@tiptap/extension-horizontal-rule'
 import Suggestion from '@tiptap/suggestion'
 import tippy from 'tippy.js'
 import 'tippy.js/dist/tippy.css'
+// ✨ P3: 引入 Diff 算法库
+import { diff_match_patch, DIFF_DELETE, DIFF_INSERT } from 'diff-match-patch'
 
 import { useEffect, useState, useImperativeHandle, forwardRef, useRef } from 'react'
 import { cn } from "@/lib/utils"
@@ -29,13 +31,37 @@ import {
   Table as TableIcon, Quote, Sparkles, Loader2, Minus, 
   Type, Cloud, ChevronDown, Plus, Minus as MinusIcon,
   Heading1, Heading2, Heading3, Check, X, Copy, Wand2,
-  MoreHorizontal
+  GitCompare // ✨ P3 图标
 } from 'lucide-react'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
 
+// ✨ P3: Diff 生成工具函数
+const generateDiffHtml = (oldText: string, newText: string) => {
+  const dmp = new diff_match_patch()
+  const diffs = dmp.diff_main(oldText, newText)
+  dmp.diff_cleanupSemantic(diffs)
+
+  let html = ''
+  diffs.forEach(([type, text]) => {
+    // 简单的 HTML 转义，防止注入
+    const safeText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    if (type === DIFF_DELETE) {
+      // 红色删除线
+      html += `<span style="background-color: #fee2e2; color: #dc2626; text-decoration: line-through; padding: 0 2px; border-radius: 2px;">${safeText}</span>`
+    } else if (type === DIFF_INSERT) {
+      // 绿色新增
+      html += `<span style="background-color: #dcfce7; color: #166534; font-weight: bold; padding: 0 2px; border-radius: 2px;">${safeText}</span>`
+    } else {
+      // 原文
+      html += `<span style="opacity: 0.7;">${safeText}</span>`
+    }
+  })
+  return html
+}
+
 // ==========================================
-// 1. Slash Command 配置 (UI 升级版)
+// 1. Slash Command 配置 (完整保留)
 // ==========================================
 const CommandList = forwardRef((props: any, ref) => {
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -66,7 +92,6 @@ const CommandList = forwardRef((props: any, ref) => {
   }))
 
   return (
-    // ✨ Vision Pro 风格容器：深色磨砂 + 细腻边框 + 深度阴影
     <div className="bg-black/70 backdrop-blur-2xl rounded-xl shadow-[0_20px_50px_-12px_rgba(0,0,0,0.5)] border border-white/10 overflow-hidden min-w-[280px] p-2 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/5">
       <div className="text-[10px] font-bold text-white/40 px-3 py-1.5 uppercase tracking-widest mb-1 select-none flex items-center justify-between">
         <span>AI & 基础指令</span>
@@ -80,13 +105,12 @@ const CommandList = forwardRef((props: any, ref) => {
             className={cn(
               "flex items-center gap-3 w-full px-3 py-2.5 text-sm rounded-lg transition-all duration-200 text-left group",
               index === selectedIndex 
-                ? "bg-white/20 text-white shadow-sm backdrop-brightness-150" // 选中态：高亮玻璃
-                : "text-white/70 hover:bg-white/5 hover:text-white" // 默认态
+                ? "bg-white/20 text-white shadow-sm backdrop-brightness-150" 
+                : "text-white/70 hover:bg-white/5 hover:text-white"
             )}
             onClick={() => selectItem(index)}
             onMouseEnter={() => setSelectedIndex(index)}
           >
-            {/* 图标容器：选中时反色 (白底黑标)，非常有质感 */}
             <div className={cn(
               "flex items-center justify-center w-8 h-8 rounded-[8px] border shadow-sm transition-all duration-200",
               index === selectedIndex 
@@ -105,7 +129,6 @@ const CommandList = forwardRef((props: any, ref) => {
                </span>
             </div>
             
-            {/* 选中时的回车提示 */}
             {index === selectedIndex && (
                 <div className="ml-auto text-[10px] text-white/50 bg-black/20 px-1.5 py-0.5 rounded">↵</div>
             )}
@@ -122,7 +145,7 @@ const getSuggestionItems = ({ query }: { query: string }) => {
     {
       title: 'AI 智能续写',
       desc: '基于上下文自动生成后续内容',
-      icon: <Sparkles className="w-4 h-4" />, // 去掉颜色，由容器控制颜色
+      icon: <Sparkles className="w-4 h-4" />, 
       command: ({ editor, range }: any) => {
         editor.chain().focus().deleteRange(range).run()
         if (editor.storage.aiHandler?.continue) {
@@ -130,14 +153,14 @@ const getSuggestionItems = ({ query }: { query: string }) => {
         }
       },
     },
-    { title: '一级标题', desc: '主要章节标题', icon: <Heading1 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 1 }).run() },
-    { title: '二级标题', desc: '次级章节标题', icon: <Heading2 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 2 }).run() },
-    { title: '三级标题', desc: '小节标题', icon: <Heading3 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 3 }).run() },
-    { title: '引用块', desc: '强调或引用法律条文', icon: <Quote className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleBlockquote().run() },
+    { title: '一级标题', desc: '大标题', icon: <Heading1 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 1 }).run() },
+    { title: '二级标题', desc: '中标题', icon: <Heading2 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 2 }).run() },
+    { title: '三级标题', desc: '小标题', icon: <Heading3 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 3 }).run() },
+    { title: '引用块', desc: '引用重点内容', icon: <Quote className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleBlockquote().run() },
     { title: '无序列表', desc: '圆点项目符号', icon: <List className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleBulletList().run() },
     { title: '有序列表', desc: '数字编号列表', icon: <ListOrdered className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleOrderedList().run() },
     { title: '分割线', desc: '视觉分隔符', icon: <Minus className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setHorizontalRule().run() },
-  ].filter(item => item.title.toLowerCase().includes(query.toLowerCase()))
+  ].filter(item => item.title.toLowerCase().startsWith(query.toLowerCase()))
 }
 
 const renderSuggestion = () => {
@@ -157,7 +180,6 @@ const renderSuggestion = () => {
         trigger: 'manual',
         placement: 'bottom-start',
         zIndex: 9999,
-        // 移除默认箭头，更符合现代极简风
         arrow: false, 
       })
     },
@@ -192,7 +214,7 @@ const SlashCommand = Extension.create({
   },
 })
 
-// --- 2. Font Size Extension ---
+// --- 2. Font Size Extension (完整保留) ---
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
     fontSize: {
@@ -228,7 +250,7 @@ const FontSize = Extension.create({
   },
 })
 
-// --- 3. Constants & Helpers ---
+// --- 3. Constants & Helpers (完整保留) ---
 interface EditorProps {
   content: string
   onChange: (value: string) => void
@@ -250,7 +272,7 @@ const FONT_SIZE_MAP = [
 ];
 const SORTED_FONT_SIZES = Array.from(new Set(FONT_SIZE_MAP.map(i => parseInt(i.value)))).sort((a, b) => a - b);
 
-// --- 4. MenuBar ---
+// --- 4. MenuBar (完整保留) ---
 const MenuBar = ({ editor }: { editor: any }) => {
   if (!editor) return null
   const btnClass = (isActive: boolean = false) => cn(
@@ -359,6 +381,10 @@ export default function Editor({ content, onChange, onStatsChange, className }: 
   const [showResult, setShowResult] = useState(false)
   const [wordCount, setWordCount] = useState(0)
   
+  // ✨ P3 新增: 红黑文对比状态
+  const [diffHtml, setDiffHtml] = useState('')
+  const [originalText, setOriginalText] = useState('')
+  
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ bulletList: { keepMarks: true }, orderedList: { keepMarks: true }, history: { depth: 100 } }),
@@ -370,6 +396,7 @@ export default function Editor({ content, onChange, onStatsChange, className }: 
       BubbleMenuExtension.configure({ 
         pluginKey: 'bubbleMenu',
         shouldShow: ({ from, to }) => {
+            // 只要有选区，或者正在生成/展示结果，都保持显示
             return (from !== to) || isStreaming || showResult
         }
       }),
@@ -436,13 +463,14 @@ export default function Editor({ content, onChange, onStatsChange, className }: 
 
   if (editor) { editor.storage.aiHandler = { continue: handleAiContinuation } }
 
-  // --- AI 润色逻辑 (Bubble Menu 调用) ---
+  // --- AI 润色逻辑 (Bubble Menu 调用 - P3升级版) ---
   const handleAiPolishSelection = async () => {
     if (!editor) return
     const { from, to } = editor.state.selection
     const selection = editor.state.doc.textBetween(from, to, ' ')
     if (!selection) return
 
+    setOriginalText(selection) // ✨ 保存原文，用于 Diff
     setIsStreaming(true)
     setShowResult(false)
     setAiResult('') 
@@ -458,14 +486,21 @@ export default function Editor({ content, onChange, onStatsChange, className }: 
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
       
+      let fullText = ''
       if(reader) {
           while (true) {
             const { value, done } = await reader.read()
             if (done) break
             const chunk = decoder.decode(value)
+            fullText += chunk
             setAiResult(prev => prev + chunk)
           }
       }
+      
+      // ✨ P3: 生成 Diff HTML
+      const diff = generateDiffHtml(selection, fullText)
+      setDiffHtml(diff)
+
       setIsStreaming(false)
       setShowResult(true)
 
@@ -512,7 +547,7 @@ export default function Editor({ content, onChange, onStatsChange, className }: 
                 "flex flex-col overflow-hidden transition-all duration-300 ease-out origin-top-left",
                 // 核心样式：黑色磨砂玻璃 + 深度阴影 + 细腻边框
                 "bg-black/70 backdrop-blur-2xl border border-white/10 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.5)] rounded-2xl text-white/90 ring-1 ring-white/5",
-                isStreaming || showResult ? "min-w-[400px]" : "min-w-fit"
+                isStreaming || showResult ? "min-w-[450px]" : "min-w-fit"
             )}>
                 
                 {/* 1. 生成态：流式打字机 */}
@@ -529,22 +564,34 @@ export default function Editor({ content, onChange, onStatsChange, className }: 
                     </div>
                 )}
 
-                {/* 2. 结果态：对比决策 */}
+                {/* 2. 结果态：Diff 对比决策 (✨ P3) */}
                 {!isStreaming && showResult && (
                     <div className="flex flex-col">
                         <div className="p-5 bg-white/5 border-b border-white/5 max-h-[300px] overflow-y-auto">
-                            <div className="text-[10px] text-white/40 mb-2 font-medium tracking-wide uppercase">Suggested Change</div>
-                            <div className="text-[15px] leading-relaxed text-white font-serif whitespace-pre-wrap">{aiResult}</div>
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-[10px] text-white/40 font-bold uppercase tracking-wider flex items-center gap-1">
+                                    <GitCompare size={12} /> Redlining View
+                                </span>
+                                <div className="flex gap-2 text-[10px]">
+                                    <span className="flex items-center gap-1 text-red-400"><span className="w-2 h-2 bg-red-500/20 border border-red-500 rounded-sm line-through decoration-red-500">A</span> Deleted</span>
+                                    <span className="flex items-center gap-1 text-green-400"><span className="w-2 h-2 bg-green-500/20 border border-green-500 rounded-sm">B</span> Added</span>
+                                </div>
+                            </div>
+                            {/* ✨ 渲染 Diff 结果 */}
+                            <div 
+                                className="text-[15px] leading-relaxed text-slate-300 font-serif whitespace-pre-wrap bg-black/20 p-3 rounded-lg border border-white/5" 
+                                dangerouslySetInnerHTML={{ __html: diffHtml }} 
+                            />
                         </div>
                         <div className="flex items-center p-2 gap-2 bg-black/40">
-                            <button onClick={applyAiResult} className="flex-1 flex items-center justify-center gap-2 h-9 rounded-xl hover:bg-white/20 active:bg-white/30 text-white text-xs font-bold transition-all shadow-sm">
-                                <Check size={14} /> 替换
+                            <button onClick={applyAiResult} className="flex-1 flex items-center justify-center gap-2 h-9 rounded-xl hover:bg-green-500/20 active:bg-green-500/30 text-green-400 text-xs font-bold transition-all shadow-sm">
+                                <Check size={14} /> Accept
                             </button>
                             <button onClick={() => navigator.clipboard.writeText(aiResult)} className="flex-1 flex items-center justify-center gap-2 h-9 rounded-xl hover:bg-white/10 active:bg-white/20 text-white/70 text-xs font-bold transition-all">
-                                <Copy size={14} /> 复制
+                                <Copy size={14} /> Copy
                             </button>
                             <button onClick={discardAiResult} className="flex-1 flex items-center justify-center gap-2 h-9 rounded-xl hover:bg-red-500/20 active:bg-red-500/30 text-red-300 hover:text-red-200 text-xs font-bold transition-all">
-                                <X size={14} /> 放弃
+                                <X size={14} /> Discard
                             </button>
                         </div>
                     </div>
