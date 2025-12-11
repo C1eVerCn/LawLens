@@ -64,7 +64,6 @@ const FontSize = Extension.create({
   },
   addCommands() {
     return {
-      // 显式指定参数类型，解决 implicit any 报错
       setFontSize: (fontSize: string) => ({ chain }: { chain: any }) => {
         return chain().setMark('textStyle', { fontSize }).run()
       },
@@ -82,7 +81,39 @@ interface EditorProps {
   className?: string
 }
 
-const FONT_SIZES = [12, 14, 15, 16, 18, 20, 24, 30, 36, 48, 60, 72]
+// --- Word 标准中文字号对照表 (像素近似值) ---
+// 顺序：从大到小，或者按照 Word 下拉框的习惯
+const FONT_SIZE_MAP = [
+  { label: '初号', value: '56' }, // 42pt
+  { label: '小初', value: '48' }, // 36pt
+  { label: '一号', value: '34' }, // 26pt
+  { label: '小一', value: '32' }, // 24pt
+  { label: '二号', value: '29' }, // 22pt
+  { label: '小二', value: '24' }, // 18pt
+  { label: '三号', value: '21' }, // 16pt
+  { label: '小三', value: '20' }, // 15pt
+  { label: '四号', value: '18' }, // 14pt
+  { label: '小四', value: '16' }, // 12pt
+  { label: '五号', value: '14' }, // 10.5pt
+  { label: '小五', value: '12' }, // 9pt
+  // 补充常用数字字号，防止断层
+  { label: '10', value: '10' },
+  { label: '11', value: '11' },
+  { label: '12', value: '12' },
+  { label: '14', value: '14' },
+  { label: '16', value: '16' },
+  { label: '18', value: '18' },
+  { label: '20', value: '20' },
+  { label: '24', value: '24' },
+  { label: '30', value: '30' },
+  { label: '36', value: '36' },
+  { label: '48', value: '48' },
+  { label: '60', value: '60' },
+  { label: '72', value: '72' },
+];
+
+// 去重并排序，方便计算上一档/下一档
+const SORTED_FONT_SIZES = Array.from(new Set(FONT_SIZE_MAP.map(i => parseInt(i.value)))).sort((a, b) => a - b);
 
 const MenuBar = ({ editor }: { editor: any }) => {
   if (!editor) return null
@@ -106,15 +137,30 @@ const MenuBar = ({ editor }: { editor: any }) => {
     />
   )
 
-  const currentFontSize = editor.getAttributes('textStyle').fontSize || 16
+  // 获取当前字号
+  const currentSizeVal = editor.getAttributes('textStyle').fontSize || '16';
+  
+  // 查找对应的显示标签（优先显示中文名，如 "小四"）
+  const displayLabel = FONT_SIZE_MAP.find(i => i.value === currentSizeVal)?.label || currentSizeVal;
 
-  const adjustFontSize = (amount: number) => {
-    const current = parseInt(currentFontSize) || 16
-    // 找到最接近的字号档位
-    const next = FONT_SIZES.reduce((prev, curr) => {
-      return (Math.abs(curr - (current + amount)) < Math.abs(prev - (current + amount)) ? curr : prev)
-    })
-    editor.chain().focus().setFontSize(String(next)).run()
+  const adjustFontSize = (step: number) => {
+    const current = parseInt(currentSizeVal);
+    const currentIndex = SORTED_FONT_SIZES.indexOf(current);
+    
+    let nextIndex = currentIndex + step;
+    if (currentIndex === -1) {
+        // 如果当前是自定义字号，找个最近的
+        const nearest = SORTED_FONT_SIZES.reduce((prev, curr) => 
+            Math.abs(curr - current) < Math.abs(prev - current) ? curr : prev
+        );
+        nextIndex = SORTED_FONT_SIZES.indexOf(nearest) + step;
+    }
+
+    // 边界检查
+    if (nextIndex < 0) nextIndex = 0;
+    if (nextIndex >= SORTED_FONT_SIZES.length) nextIndex = SORTED_FONT_SIZES.length - 1;
+
+    editor.chain().focus().setFontSize(String(SORTED_FONT_SIZES[nextIndex])).run();
   }
 
   return (
@@ -127,9 +173,9 @@ const MenuBar = ({ editor }: { editor: any }) => {
       
       <Divider />
 
-      {/* 字体与字号 */}
+      {/* Word 风格字体与字号控制区 */}
       <div className="flex items-center gap-2 mr-2">
-         {/* 字体下拉 */}
+         {/* 字体下拉框 */}
          <div className="relative group">
              <select 
                 className="h-7 text-xs font-medium border border-slate-300 rounded px-2 bg-white text-slate-700 focus:outline-none focus:border-indigo-500 hover:bg-slate-50 cursor-pointer appearance-none pr-6 min-w-[80px]"
@@ -140,36 +186,46 @@ const MenuBar = ({ editor }: { editor: any }) => {
                 <option value="SimSun">宋体</option>
                 <option value="SimHei">黑体</option>
                 <option value="KaiTi">楷体</option>
+                <option value="FangSong">仿宋</option>
                 <option value="Arial">Arial</option>
                 <option value="Times New Roman">Times New Roman</option>
              </select>
              <ChevronDown className="absolute right-1.5 top-2 w-3 h-3 text-slate-400 pointer-events-none" />
          </div>
 
-         {/* 字号下拉 */}
+         {/* 字号下拉框 (Word 风格) */}
          <div className="relative group">
              <select 
-                className="h-7 text-xs font-medium border border-slate-300 rounded px-1 bg-white text-slate-700 focus:outline-none focus:border-indigo-500 hover:bg-slate-50 cursor-pointer appearance-none pr-5 min-w-[50px] text-center"
+                className="h-7 text-xs font-medium border border-slate-300 rounded px-1 bg-white text-slate-700 focus:outline-none focus:border-indigo-500 hover:bg-slate-50 cursor-pointer appearance-none pr-5 min-w-[60px] text-center"
                 onChange={(e) => editor.chain().focus().setFontSize(e.target.value).run()}
-                value={currentFontSize}
+                value={currentSizeVal}
              >
-                {FONT_SIZES.map(size => (
-                  <option key={size} value={size}>{size}</option>
-                ))}
+                {/* 1. 先渲染中文字号 */}
+                <optgroup label="中文字号">
+                    {FONT_SIZE_MAP.filter(i => !/^\d+$/.test(i.label)).map(item => (
+                        <option key={item.label} value={item.value}>{item.label}</option>
+                    ))}
+                </optgroup>
+                {/* 2. 再渲染数字字号 */}
+                <optgroup label="数字字号">
+                    {FONT_SIZE_MAP.filter(i => /^\d+$/.test(i.label)).map(item => (
+                        <option key={item.label} value={item.value}>{item.label}</option>
+                    ))}
+                </optgroup>
              </select>
              <ChevronDown className="absolute right-1 top-2 w-3 h-3 text-slate-400 pointer-events-none" />
          </div>
 
-         {/* 增减字号按钮 */}
+         {/* 增大/缩小按钮 */}
          <div className="flex border border-slate-300 rounded overflow-hidden h-7 bg-white">
             <button 
-                onClick={() => adjustFontSize(2)} 
-                className="px-2 hover:bg-slate-100 text-slate-600 border-r border-slate-200 flex items-center justify-center active:bg-slate-200" title="增大字号">
+                onClick={() => adjustFontSize(1)} 
+                className="px-2 hover:bg-slate-100 text-slate-600 border-r border-slate-200 flex items-center justify-center active:bg-slate-200" title="增大字号 (Ctrl+])">
                 <span className="text-[14px] font-bold">A</span><Plus size={8} className="-mt-1 -ml-0.5"/>
             </button>
             <button 
-                onClick={() => adjustFontSize(-2)} 
-                className="px-2 hover:bg-slate-100 text-slate-600 flex items-center justify-center active:bg-slate-200" title="减小字号">
+                onClick={() => adjustFontSize(-1)} 
+                className="px-2 hover:bg-slate-100 text-slate-600 flex items-center justify-center active:bg-slate-200" title="减小字号 (Ctrl+[)">
                 <span className="text-[10px] font-bold">A</span><MinusIcon size={8} className="-mt-1 -ml-0.5"/>
             </button>
          </div>
@@ -258,7 +314,8 @@ export default function Editor({ content, onChange, onStatsChange, className }: 
     ],
     editorProps: {
       attributes: {
-        class: 'print-content prose prose-slate max-w-none focus:outline-none min-h-[1000px] w-full md:max-w-[900px] px-[4rem] py-[4rem] bg-white shadow-[0_4px_20px_rgba(0,0,0,0.08)] border border-slate-200/50 mx-auto font-serif text-slate-800 leading-[1.8] text-[17px] selection:bg-indigo-100 selection:text-indigo-900',
+        // Word 风格：初始字号设为 16px (小四)
+        class: 'print-content prose prose-slate max-w-none focus:outline-none min-h-[1000px] w-full md:max-w-[900px] px-[4rem] py-[4rem] bg-white shadow-[0_4px_20px_rgba(0,0,0,0.08)] border border-slate-200/50 mx-auto font-serif text-slate-800 leading-[1.8] text-[16px] selection:bg-indigo-100 selection:text-indigo-900',
       },
     },
     content: content,
