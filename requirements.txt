@@ -6,3 +6,5 @@ supabase
 openai
 PyJWT==2.8.0
 tqdm
+mammoth
+python-multipart
