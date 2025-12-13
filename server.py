@@ -19,6 +19,9 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY")
 
+# ✨ 模型选择：使用 Qwen 2.5 系列最强版本 (72B)
+MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
+
 supabase: Optional[Client] = None
 client: Optional[OpenAI] = None
 
@@ -42,7 +45,7 @@ def startup_event():
             api_key=SILICONFLOW_API_KEY,
             base_url="https://api.siliconflow.cn/v1"
         )
-        print("✅ LawLens 智能引擎已启动 (Memory + Deep RAG + Risk + Upload)")
+        print(f"✅ LawLens 智能引擎已启动 (模型: {MODEL_NAME} | 全中文模式)")
     except Exception as e:
         print(f"❌ 初始化失败: {e}")
 
@@ -71,7 +74,7 @@ class MemoryCreate(BaseModel):
     type: str = "preference"
 
 # ===========================
-# 3. 🧠 Memory Manager (记忆管理模块)
+# 3. 🧠 Memory Manager
 # ===========================
 class MemoryManager:
     @staticmethod
@@ -83,11 +86,8 @@ class MemoryManager:
             supabase.table("agent_memories").insert({
                 "user_id": user_id, "content": content, "memory_type": m_type, "embedding": vec
             }).execute()
-            print(f"🧠 [Memory] 已记住: {content}")
             return True
-        except Exception as e:
-            print(f"❌ Memory Write Error: {e}")
-            return False
+        except Exception: return False
 
     @staticmethod
     def retrieve_memories(user_id: str, query: str) -> str:
@@ -100,25 +100,18 @@ class MemoryManager:
             }).execute()
             if not rpc_resp.data: return ""
             return "\n".join([f"- {m['content']}" for m in rpc_resp.data])
-        except Exception as e:
-            print(f"❌ Memory Read Error: {e}")
-            return ""
+        except Exception: return ""
 
 # ===========================
-# 4. 辅助接口 (Word解析 + 历史 + 保存)
+# 4. 辅助接口
 # ===========================
-
-# ✨ P0: Word 上传解析接口
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
     try:
         content = await file.read()
-        # 使用 mammoth 将 docx 转换为 HTML
         result = mammoth.convert_to_html(io.BytesIO(content))
-        html = result.value
-        return {"status": "success", "content": html}
+        return {"status": "success", "content": result.value}
     except Exception as e:
-        print(f"Upload failed: {e}")
         return {"status": "error", "msg": "文件解析失败，请确保是 .docx 文件"}
 
 @app.post("/api/memory")
@@ -130,15 +123,11 @@ async def create_memory(mem: MemoryCreate):
 async def save_document(doc: DocumentSave):
     if not supabase: return {"status": "error", "msg": "DB未连接"}
     try:
-        # 智能截取标题
         raw_text = doc.content.replace('<', '').replace('>', '')[:20]
         title = doc.title if doc.title and doc.title != "未命名法律文书" else f"{raw_text}..."
-        
-        data = {"title": title, "content": doc.content, "user_id": doc.user_id}
-        supabase.table("documents").insert(data).execute()
+        supabase.table("documents").insert({"title": title, "content": doc.content, "user_id": doc.user_id}).execute()
         return {"status": "success"}
     except Exception as e:
-        print(f"Save error: {e}")
         return {"status": "error", "msg": str(e)}
 
 @app.get("/api/history")
@@ -148,58 +137,44 @@ async def get_history(user_id: Optional[str] = None):
         query = supabase.table("documents").select("*").order("created_at", desc=True).limit(20)
         if user_id: query = query.eq("user_id", user_id)
         else: query = query.is_("user_id", "null")
-        res = query.execute()
-        return res.data
-    except Exception as e:
-        print(f"History error: {e}")
-        return []
+        return query.execute().data
+    except Exception: return []
 
 # ===========================
-# 5. 核心 AI 逻辑 (RAG + 风险评分)
+# 5. 核心 AI 逻辑 (全汉化)
 # ===========================
 
-def get_relevant_laws_formatted(query: str):
-    """Deep RAG 检索"""
+def get_rag_context(query: str):
     if not client or not supabase: return ""
     try:
-        print(f"🔍 [RAG] 检索: {query[:15]}...")
-        response = client.embeddings.create(model="BAAI/bge-m3", input=query)
-        query_vector = response.data[0].embedding
-        rpc_response = supabase.rpc("match_documents", {
-            "query_embedding": query_vector, "match_threshold": 0.45, "match_count": 4 
+        resp = client.embeddings.create(model="BAAI/bge-m3", input=query)
+        vec = resp.data[0].embedding
+        rpc_resp = supabase.rpc("match_documents", {
+            "query_embedding": vec, "match_threshold": 0.45, "match_count": 3 
         }).execute()
         
-        data = rpc_response.data
-        if not data: return ""
-
-        formatted_sources = []
-        for idx, doc in enumerate(data):
-            meta = doc.get('metadata', {}) or {}
-            source_name = doc.get('law_name') or meta.get('source') or "法律数据库"
-            content_snippet = doc['content'][:500].replace("\n", " ")
-            block = f"[参考资料 {idx + 1}] 来源：{source_name}\n内容：{content_snippet}..."
-            formatted_sources.append(block)
-            
-        return "\n\n".join(formatted_sources)
-    except Exception as e:
-        print(f"❌ RAG Error: {e}")
-        return ""
+        if not rpc_resp.data: return ""
+        formatted = ""
+        for i, doc in enumerate(rpc_resp.data):
+            snippet = doc['content'][:500].replace('\n', ' ')
+            formatted += f"【参考资料 {i+1}】\n{snippet}...\n"
+        return formatted
+    except Exception: return ""
 
 @app.post("/api/analyze")
 async def analyze(request: AnalyzeRequest):
     """核心 AI 接口"""
     
-    # ✨ P2: 风险评分模式 (直接返回 JSON)
+    # --- P2: 风险评分 (JSON) ---
     if request.mode == "risk_score":
         try:
-            print("📊 [Risk Scan] 开始风险评估...")
             prompt = f"""
             你是一名资深法律风控专家。请阅读以下文书，从四个维度进行评分（0-100）。
             【待审文书】{request.current_doc[:3000]}
-            【输出要求】仅输出标准 JSON，不要包含 Markdown 格式或其他文字：
+            【输出要求】仅输出标准 JSON：
             {{
                 "total_score": 85,
-                "summary": "一句话简评（例如：整体合规，但违约责任对甲方不利）",
+                "summary": "一句话中文简评",
                 "dimensions": [
                     {{ "subject": "合规性", "A": 90, "fullMark": 100 }},
                     {{ "subject": "权益保护", "A": 75, "fullMark": 100 }},
@@ -209,77 +184,84 @@ async def analyze(request: AnalyzeRequest):
             }}
             """
             completion = client.chat.completions.create(
-                model="Qwen/Qwen2.5-32B-Instruct",
+                model=MODEL_NAME,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1, response_format={"type": "json_object"}
             )
             result = json.loads(completion.choices[0].message.content)
             return JSONResponse(result)
-        except Exception as e:
-            print(f"Risk scan failed: {e}")
-            return JSONResponse({"error": "Analysis failed"}, status=500)
+        except Exception:
+            return JSONResponse({"error": "分析失败"}, status=500)
 
     # --- 常规流式模式 ---
     last_user_msg = request.selection if request.mode == "selection_polish" else request.messages[-1].content
     user_id = request.user_id
     
-    # 1. RAG 检索 (文档对话模式下不检索外部)
+    # 1. RAG
     rag_context = ""
+    found_cases = False
     if request.mode != "selection_polish" and request.mode != "chat_doc":
-        rag_context = get_relevant_laws_formatted(last_user_msg)
+        rag_context = get_rag_context(last_user_msg)
+        if rag_context: found_cases = True
 
-    # 2. 记忆检索
+    # 2. 记忆
     memory_context = ""
     if user_id:
         memory_context = MemoryManager.retrieve_memories(user_id, last_user_msg)
 
-    memory_section = f"【⚠️ 用户偏好记忆】\n{memory_context}\n" if memory_context else ""
-    rag_section = f"【📚 权威参考资料】\n{rag_context}\n" if rag_context else "（无特定案例，依通识撰写）"
+    # 3. 构造中文 Prompt
+    memory_section = f"【⚠️ 用户偏好记忆】\n请严格遵守：{memory_context}\n" if memory_context else ""
+    rag_section = f"【📚 法律数据库】\n{rag_context}\n" if rag_context else "（使用通用法律知识）"
 
-    base_role = "你是由 LawLens 开发的中国顶尖法律 AI 助手。"
-    html_hint = "使用 HTML 标签 (<h3>, <b>, <ul>, <blockquote>)。"
+    base_role = "你是由 LawLens 开发的中国顶尖法律 AI 助手。你的回答必须专业、严谨、符合中国法律规范。"
+    html_hint = "使用 HTML 标签排版 (<h3>, <b>, <ul>, <blockquote>)，禁止 Markdown。"
 
     system_instruction = ""
 
     if request.mode == "draft":
         system_instruction = f"""
         {base_role}
-        【任务】起草法律文书。
+        【任务】根据用户需求起草法律文书。
         {memory_section}
         {rag_section}
         {html_hint}
-        【结构】
-        1. **思维链** (<blockquote>): 分析案情、法条匹配、记忆应用。
-        2. **正文**：完整文书。
+        【输出结构】
+        1. **分析报告** (<blockquote>):
+           - **核心争议点**: 分析法律关系。
+           - **法律依据**: 引用相关法条或案例观点。
+           - **起草策略**: 说明重点条款的设计思路。
+        2. **正式文书**: 完整的合同或函件内容。
         """
     elif request.mode == "polish":
         system_instruction = f"""
         {base_role}
-        【任务】审查润色。
+        【任务】审查并润色法律文书。
         {memory_section}
-        【文档】'''{request.current_doc}'''
+        【待审文档】'''{request.current_doc}'''
         {rag_section}
         {html_hint}
-        【结构】
-        1. **审查意见** (<blockquote>): 风险点、修改依据。
-        2. **修订全文**：用 <b>加粗</b> 标注修改。
+        【输出结构】
+        1. **审查意见** (<blockquote>):
+           - **风险提示**: 指出法律漏洞。
+           - **修改依据**: 解释为什么要改。
+        2. **修订后全文**: 输出完整文本，用 <b>加粗</b> 标记修改处。
         """
-    elif request.mode == "chat_doc": # ✨ P4: 与文档对话
+    elif request.mode == "chat_doc":
         system_instruction = f"""
         {base_role}
-        【任务】根据当前文档内容回答问题。
+        【任务】基于当前文档回答问题。
         【文档内容】'''{request.current_doc[:10000]}'''
         【用户问题】"{last_user_msg}"
-        【要求】答案必须基于文档内容，如果文档没提到则说不知道。引用原文时加粗。
+        【要求】答案必须基于文档内容，不要编造。引用原文时请加粗。
         """
     else: # selection_polish
         system_instruction = f"""
         {base_role}
-        【任务】微观润色。
+        【任务】微调选中的文本，使其更符合法言法语。
         {memory_section}
         【原文】"{request.selection}"
         【指令】"{last_user_msg}"
-        【要求】仅输出修改后的文本。
+        【要求】仅输出修改后的文本，不要废话。
         """
 
     messages = [{"role": "system", "content": system_instruction}]
@@ -291,12 +273,30 @@ async def analyze(request: AnalyzeRequest):
 
     async def generate_stream():
         try:
-            if request.mode == "draft":
-                yield "<blockquote>🧠 正在检索知识库... 回忆用户偏好...</blockquote>"
-                time.sleep(0.5) # 模拟思考
+            # A. 进度条 (全中文)
+            if request.mode != "selection_polish":
+                status_rag = f"✅ 已匹配 {rag_context.count('【参考资料')} 个相关案例" if found_cases else "⚠️ 通用法律模式"
+                status_mem = "✅ 命中用户偏好" if memory_context else "无特定偏好"
+                
+                status_html = f"""
+                <div style="background:#f8fafc; padding:12px; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:16px; font-size:13px; color:#475569;">
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                        <span style="display:inline-block; width:8px; height:8px; background:#2563eb; border-radius:50%;"></span>
+                        <b>AI 法律引擎运行中...</b>
+                    </div>
+                    <ul style="margin:0; padding-left:20px; line-height: 1.6;">
+                        <li>正在分析案情：{last_user_msg[:10]}...</li>
+                        <li>检索数据库：{status_rag}</li>
+                        <li>检索记忆库：{status_mem}</li>
+                        <li>构建逻辑链：事实认定 -> 法条匹配 -> 文书生成</li>
+                    </ul>
+                </div>
+                """
+                yield status_html
+                time.sleep(0.5)
 
             stream = client.chat.completions.create(
-                model="Qwen/Qwen2.5-32B-Instruct", 
+                model=MODEL_NAME, # 72B
                 messages=messages,
                 stream=True, 
                 temperature=0.4,
@@ -306,9 +306,7 @@ async def analyze(request: AnalyzeRequest):
                 if chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
         except Exception as e:
-            error_msg = f"<p style='color:red'>[AI 生成错误: {str(e)}]</p>"
-            print(f"❌ AI Error: {e}")
-            yield error_msg
+            yield f"<p style='color:red'>AI 服务响应错误: {str(e)}</p>"
 
     return StreamingResponse(generate_stream(), media_type="text/event-stream")
 
