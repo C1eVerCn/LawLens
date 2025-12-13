@@ -4,6 +4,7 @@ import time
 import json
 import mammoth
 import io
+import re
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -19,7 +20,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 SILICONFLOW_API_KEY = os.getenv("SILICONFLOW_API_KEY")
 
-# ✨ 模型选择：使用 Qwen 2.5 系列最强版本 (72B)
+# ✨ 使用 Qwen 2.5 72B (当前开源最强，相当于 Max)
 MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
 
 supabase: Optional[Client] = None
@@ -43,14 +44,44 @@ def startup_event():
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         client = OpenAI(
             api_key=SILICONFLOW_API_KEY,
-            base_url="https://api.siliconflow.cn/v1"
+            base_url="[https://api.siliconflow.cn/v1](https://api.siliconflow.cn/v1)"
         )
-        print(f"✅ LawLens 智能引擎已启动 (模型: {MODEL_NAME} | 全中文模式)")
+        print(f"✅ LawLens 智能引擎已启动 (模型: {MODEL_NAME})")
     except Exception as e:
         print(f"❌ 初始化失败: {e}")
 
 # ===========================
-# 2. 数据模型
+# 2. 工具函数：JSON 清洗 (核心修复)
+# ===========================
+def clean_json_output(content: str):
+    """
+    清洗大模型返回的 JSON 字符串，去除 Markdown 标记
+    """
+    try:
+        # 1. 尝试去除 markdown 代码块
+        if "```" in content:
+            # 匹配 ```json ... ``` 或 ``` ... ``` 中间的内容
+            pattern = r"```(?:json)?\s*(.*?)\s*```"
+            match = re.search(pattern, content, re.DOTALL)
+            if match:
+                content = match.group(1)
+        
+        # 2. 去除首尾空白
+        content = content.strip()
+        
+        # 3. 尝试解析
+        return json.loads(content)
+    except Exception as e:
+        print(f"❌ JSON 解析失败: {e}\n原始内容: {content}")
+        # 兜底返回一个空结构，防止前端崩溃
+        return {
+            "total_score": 0,
+            "summary": "AI 解析数据格式异常，请重试。",
+            "dimensions": []
+        }
+
+# ===========================
+# 3. 数据模型
 # ===========================
 class ChatMessage(BaseModel):
     role: str
@@ -60,7 +91,7 @@ class AnalyzeRequest(BaseModel):
     messages: List[ChatMessage]
     current_doc: str = ""
     selection: Optional[str] = "" 
-    mode: str = "draft" # draft | polish | selection_polish | risk_score | chat_doc
+    mode: str = "draft" 
     user_id: Optional[str] = None 
 
 class DocumentSave(BaseModel):
@@ -74,7 +105,7 @@ class MemoryCreate(BaseModel):
     type: str = "preference"
 
 # ===========================
-# 3. 🧠 Memory Manager
+# 4. 🧠 Memory Manager
 # ===========================
 class MemoryManager:
     @staticmethod
@@ -103,7 +134,7 @@ class MemoryManager:
         except Exception: return ""
 
 # ===========================
-# 4. 辅助接口
+# 5. 辅助接口
 # ===========================
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
@@ -141,7 +172,7 @@ async def get_history(user_id: Optional[str] = None):
     except Exception: return []
 
 # ===========================
-# 5. 核心 AI 逻辑 (全汉化)
+# 6. 核心 AI 逻辑
 # ===========================
 
 def get_rag_context(query: str):
@@ -168,13 +199,22 @@ async def analyze(request: AnalyzeRequest):
     # --- P2: 风险评分 (JSON) ---
     if request.mode == "risk_score":
         try:
+            print("📊 [Risk Scan] 正在调用 Qwen 72B 进行体检...")
+            
+            # 使用更严格的 Prompt 引导模型输出纯 JSON
             prompt = f"""
-            你是一名资深法律风控专家。请阅读以下文书，从四个维度进行评分（0-100）。
-            【待审文书】{request.current_doc[:3000]}
-            【输出要求】仅输出标准 JSON：
+            你是一名资深的法律合规专家。请仔细审查以下法律文书片段，并从四个维度进行评分（0-100分）。
+            
+            【待审文书内容】
+            {request.current_doc[:4000]} 
+            
+            【任务要求】
+            请直接返回一个标准的 JSON 对象，不要包含任何 Markdown 格式（如 ```json），不要包含任何额外的解释文字。
+            
+            JSON 数据结构必须严格如下：
             {{
                 "total_score": 85,
-                "summary": "一句话中文简评",
+                "summary": "这里写一句话的中文简评，指出主要风险或优点。",
                 "dimensions": [
                     {{ "subject": "合规性", "A": 90, "fullMark": 100 }},
                     {{ "subject": "权益保护", "A": 75, "fullMark": 100 }},
@@ -183,33 +223,43 @@ async def analyze(request: AnalyzeRequest):
                 ]
             }}
             """
+            
             completion = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1, response_format={"type": "json_object"}
+                model=MODEL_NAME, # Qwen/Qwen2.5-72B-Instruct
+                messages=[
+                    {"role": "system", "content": "你是一个只输出 JSON 格式的 API 接口。"},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1, 
+                # 移除 response_format 参数，防止部分模型网关报错，改用手动清洗
             )
-            result = json.loads(completion.choices[0].message.content)
+            
+            raw_content = completion.choices[0].message.content
+            print(f"📥 [Raw AI Output]: {raw_content[:100]}...") # 打印日志方便调试
+            
+            # 清洗并解析 JSON
+            result = clean_json_output(raw_content)
+            
             return JSONResponse(result)
-        except Exception:
-            return JSONResponse({"error": "分析失败"}, status=500)
+            
+        except Exception as e:
+            print(f"❌ Risk scan failed: {e}")
+            return JSONResponse({"error": "体检服务暂时繁忙，请稍后重试"}, status=500)
 
     # --- 常规流式模式 ---
     last_user_msg = request.selection if request.mode == "selection_polish" else request.messages[-1].content
     user_id = request.user_id
     
-    # 1. RAG
     rag_context = ""
     found_cases = False
     if request.mode != "selection_polish" and request.mode != "chat_doc":
         rag_context = get_rag_context(last_user_msg)
         if rag_context: found_cases = True
 
-    # 2. 记忆
     memory_context = ""
     if user_id:
         memory_context = MemoryManager.retrieve_memories(user_id, last_user_msg)
 
-    # 3. 构造中文 Prompt
     memory_section = f"【⚠️ 用户偏好记忆】\n请严格遵守：{memory_context}\n" if memory_context else ""
     rag_section = f"【📚 法律数据库】\n{rag_context}\n" if rag_context else "（使用通用法律知识）"
 
@@ -221,47 +271,42 @@ async def analyze(request: AnalyzeRequest):
     if request.mode == "draft":
         system_instruction = f"""
         {base_role}
-        【任务】根据用户需求起草法律文书。
+        【任务】起草法律文书。
         {memory_section}
         {rag_section}
         {html_hint}
         【输出结构】
-        1. **分析报告** (<blockquote>):
-           - **核心争议点**: 分析法律关系。
-           - **法律依据**: 引用相关法条或案例观点。
-           - **起草策略**: 说明重点条款的设计思路。
-        2. **正式文书**: 完整的合同或函件内容。
+        1. **分析报告** (<blockquote>): 核心争议点、法律依据、起草策略。
+        2. **正式文书**: 完整的合同或函件。
         """
     elif request.mode == "polish":
         system_instruction = f"""
         {base_role}
-        【任务】审查并润色法律文书。
+        【任务】审查并润色。
         {memory_section}
-        【待审文档】'''{request.current_doc}'''
+        【文档】'''{request.current_doc}'''
         {rag_section}
         {html_hint}
         【输出结构】
-        1. **审查意见** (<blockquote>):
-           - **风险提示**: 指出法律漏洞。
-           - **修改依据**: 解释为什么要改。
-        2. **修订后全文**: 输出完整文本，用 <b>加粗</b> 标记修改处。
+        1. **审查意见** (<blockquote>): 风险提示、修改依据。
+        2. **修订全文**: 用 <b>加粗</b> 标记修改处。
         """
     elif request.mode == "chat_doc":
         system_instruction = f"""
         {base_role}
-        【任务】基于当前文档回答问题。
-        【文档内容】'''{request.current_doc[:10000]}'''
-        【用户问题】"{last_user_msg}"
-        【要求】答案必须基于文档内容，不要编造。引用原文时请加粗。
+        【任务】基于文档回答问题。
+        【文档】'''{request.current_doc[:10000]}'''
+        【问题】"{last_user_msg}"
+        【要求】答案必须基于文档，引用处加粗。
         """
-    else: # selection_polish
+    else: 
         system_instruction = f"""
         {base_role}
-        【任务】微调选中的文本，使其更符合法言法语。
+        【任务】微调选中文本。
         {memory_section}
         【原文】"{request.selection}"
         【指令】"{last_user_msg}"
-        【要求】仅输出修改后的文本，不要废话。
+        【要求】仅输出修改后的文本。
         """
 
     messages = [{"role": "system", "content": system_instruction}]
@@ -273,11 +318,9 @@ async def analyze(request: AnalyzeRequest):
 
     async def generate_stream():
         try:
-            # A. 进度条 (全中文)
             if request.mode != "selection_polish":
                 status_rag = f"✅ 已匹配 {rag_context.count('【参考资料')} 个相关案例" if found_cases else "⚠️ 通用法律模式"
-                status_mem = "✅ 命中用户偏好" if memory_context else "无特定偏好"
-                
+                status_mem = "✅ 命中偏好" if memory_context else "无特定偏好"
                 status_html = f"""
                 <div style="background:#f8fafc; padding:12px; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:16px; font-size:13px; color:#475569;">
                     <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
@@ -285,10 +328,9 @@ async def analyze(request: AnalyzeRequest):
                         <b>AI 法律引擎运行中...</b>
                     </div>
                     <ul style="margin:0; padding-left:20px; line-height: 1.6;">
-                        <li>正在分析案情：{last_user_msg[:10]}...</li>
-                        <li>检索数据库：{status_rag}</li>
-                        <li>检索记忆库：{status_mem}</li>
-                        <li>构建逻辑链：事实认定 -> 法条匹配 -> 文书生成</li>
+                        <li>分析案情：{last_user_msg[:10]}...</li>
+                        <li>数据库：{status_rag}</li>
+                        <li>记忆库：{status_mem}</li>
                     </ul>
                 </div>
                 """
@@ -296,7 +338,7 @@ async def analyze(request: AnalyzeRequest):
                 time.sleep(0.5)
 
             stream = client.chat.completions.create(
-                model=MODEL_NAME, # 72B
+                model=MODEL_NAME, 
                 messages=messages,
                 stream=True, 
                 temperature=0.4,
