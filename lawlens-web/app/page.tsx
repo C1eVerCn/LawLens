@@ -11,7 +11,7 @@ import {
   ArrowUp, BookOpen, LayoutDashboard, Settings, 
   User as UserIcon, BrainCircuit, ChevronLeft,
   CheckCircle2, Loader2, Share2, AlertCircle, X, Lock, Palette, UploadCloud, Activity,
-  FileText
+  FileText, Maximize2, Minimize2 // ✨ P7: 专注模式图标
 } from 'lucide-react'
 
 import { exportToWord } from '@/lib/export'
@@ -141,6 +141,9 @@ function MainContent() {
 
   // ✨ P4: 与文档对话开关
   const [chatWithDoc, setChatWithDoc] = useState(false)
+  
+  // ✨ P7: 专注模式开关
+  const [isFocusMode, setIsFocusMode] = useState(false)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => setUser(user))
@@ -315,7 +318,6 @@ function MainContent() {
     setIsAnalyzing(true)
     setCurrentMessages(prev => [...prev, { role: 'assistant', content: '' }])
 
-    // ✨ P4: 检查是否开启文档对话
     const requestMode = chatWithDoc ? 'chat_doc' : mode
 
     try {
@@ -356,8 +358,11 @@ function MainContent() {
   return (
     <div className="flex h-screen w-full bg-[#FAFAFA] text-slate-900 font-sans overflow-hidden">
       
-      {/* 1. 侧边栏 */}
-      <aside className="w-[60px] bg-[#1C1C1E] flex flex-col items-center py-6 gap-6 z-40 shrink-0 border-r border-white/5">
+      {/* 1. 侧边栏 (P7: 专注模式下隐藏) */}
+      <aside className={cn(
+          "bg-[#1C1C1E] flex flex-col items-center py-6 gap-6 z-40 shrink-0 border-r border-white/5 transition-all duration-500 ease-in-out overflow-hidden",
+          isFocusMode ? "w-0 opacity-0 px-0" : "w-[60px] opacity-100"
+      )}>
         <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/30">
           <ShieldCheck className="w-6 h-6 text-white" />
         </div>
@@ -385,8 +390,11 @@ function MainContent() {
         </div>
       </aside>
 
-      {/* 2. AI 面板 */}
-      <div className="w-[360px] flex flex-col bg-white border-r border-slate-200 z-30 shadow-[4px_0_24px_rgba(0,0,0,0.02)] relative">
+      {/* 2. AI 面板 (P7: 专注模式下隐藏) */}
+      <div className={cn(
+          "flex flex-col bg-white border-r border-slate-200 z-30 shadow-[4px_0_24px_rgba(0,0,0,0.02)] relative transition-all duration-500 ease-in-out overflow-hidden",
+          isFocusMode ? "w-0 opacity-0" : "w-[360px] opacity-100"
+      )}>
          <AnimatePresence>
             {notification && (
                 <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="absolute top-4 inset-x-0 p-2 z-50 pointer-events-none flex justify-center">
@@ -475,6 +483,15 @@ function MainContent() {
       <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-[#F2F4F7]">
          <header className="h-16 flex items-center justify-between px-8 bg-[#F2F4F7] shrink-0">
              <div className="flex items-center gap-3">
+                {/* ✨ P7: 专注模式切换按钮 */}
+                <button 
+                    onClick={() => setIsFocusMode(!isFocusMode)}
+                    className="p-2 hover:bg-white rounded-lg text-slate-500 hover:text-indigo-600 transition-colors mr-2"
+                    title={isFocusMode ? "退出专注" : "进入专注模式"}
+                >
+                    {isFocusMode ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                </button>
+
                 <span className="text-sm font-bold text-slate-700 tracking-tight">未命名法律文书</span>
                 <div className={cn("flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-all duration-300", saveStatus === 'saved' ? "bg-green-50 border-green-100 text-green-600" : saveStatus === 'saving' ? "bg-blue-50 border-blue-100 text-blue-600" : "bg-amber-50 border-amber-100 text-amber-600")}>
                     {saveStatus === 'saved' && <CheckCircle2 size={10} />}
@@ -489,8 +506,12 @@ function MainContent() {
              </div>
          </header>
 
+         {/* 编辑器本体 (P7: 专注模式下变宽) */}
          <div className="flex-1 overflow-y-auto px-4 pb-8 flex justify-center scroll-smooth bg-[#F2F4F7]">
-             <div className="w-full flex justify-center my-2 animate-in fade-in zoom-in-95 duration-300">
+             <div className={cn(
+                 "w-full flex justify-center my-2 animate-in fade-in zoom-in-95 duration-300 transition-all",
+                 isFocusMode ? "md:max-w-[1000px]" : "md:max-w-[900px]"
+             )}>
                 <Editor content={content} onChange={handleEditorChange} />
              </div>
          </div>

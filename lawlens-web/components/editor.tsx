@@ -1,6 +1,3 @@
-// --------------------------------------------------------
-// 3. components/editor.tsx (全量中文版)
-// --------------------------------------------------------
 'use client'
 
 import { useEditor, EditorContent, BubbleMenu, Extension, ReactRenderer } from '@tiptap/react'
@@ -25,7 +22,7 @@ import 'tippy.js/dist/tippy.css'
 // ✨ P3: 引入 Diff 算法库
 import { diff_match_patch, DIFF_DELETE, DIFF_INSERT } from 'diff-match-patch'
 
-import { useEffect, useState, useImperativeHandle, forwardRef, useRef } from 'react'
+import { useEffect, useState, useImperativeHandle, forwardRef } from 'react'
 import { cn } from "@/lib/utils"
 import { 
   Bold, Italic, Underline as UnderlineIcon, Strikethrough,
@@ -34,10 +31,35 @@ import {
   Table as TableIcon, Quote, Sparkles, Loader2, Minus, 
   Type, Cloud, ChevronDown, Plus, Minus as MinusIcon,
   Heading1, Heading2, Heading3, Check, X, Copy, Wand2,
-  GitCompare // ✨ P3 图标
+  GitCompare, // ✨ P3 图标
+  BookTemplate // ✨ P6 图标
 } from 'lucide-react'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
+
+// ✨ P6: 定义常用法律条款库 (为了方便直接定义在这里，也可以放在 lib/templates.ts)
+const STANDARD_CLAUSES = [
+  {
+    title: '不可抗力条款',
+    desc: '标准免责声明',
+    content: '<p><strong>第X条 不可抗力</strong></p><p>1. “不可抗力”是指所有非受不可抗力影响的一方无法控制的、不可预见、不能避免并无法克服的事件。该事件包括但不限于政府行为、自然灾害、战争、敌对行为或动乱、流行病等。</p><p>2. 出现不可抗力事件时，知情方应及时、充分地以书面形式通知对方，并告知该类事件对本协议可能产生的影响。</p>'
+  },
+  {
+    title: '保密义务条款',
+    desc: '严格保密约定',
+    content: '<p><strong>第X条 保密义务</strong></p><p>双方确认，在签署、履行本协议过程中知悉的对方的商业秘密（包括但不限于财务数据、客户名单、技术资料等）均属于保密信息。未经对方书面同意，任何一方不得向第三方披露。保密期限不受本协议效力终止的影响。</p>'
+  },
+  {
+    title: '争议解决条款',
+    desc: '诉讼管辖约定',
+    content: '<p><strong>第X条 争议解决</strong></p><p>因履行本合同所发生的或与本合同有关的一切争议，双方应首先通过友好协商解决。协商不成的，任何一方均有权向<strong>原告住所地人民法院</strong>提起诉讼。</p>'
+  },
+  {
+    title: '违约责任条款',
+    desc: '通用赔偿规则',
+    content: '<p><strong>第X条 违约责任</strong></p><p>任何一方违反本合同约定的，应赔偿因此给守约方造成的全部损失，包括但不限于直接经济损失、预期利益损失以及守约方为维权支付的律师费、诉讼费、公证费、差旅费等。</p>'
+  }
+]
 
 // ✨ P3: Diff 生成工具函数
 const generateDiffHtml = (oldText: string, newText: string) => {
@@ -64,7 +86,7 @@ const generateDiffHtml = (oldText: string, newText: string) => {
 }
 
 // ==========================================
-// 1. Slash Command 配置 (中文版)
+// 1. Slash Command 配置 (完整保留 + P6 升级)
 // ==========================================
 const CommandList = forwardRef((props: any, ref) => {
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -97,7 +119,7 @@ const CommandList = forwardRef((props: any, ref) => {
   return (
     <div className="bg-black/70 backdrop-blur-2xl rounded-xl shadow-[0_20px_50px_-12px_rgba(0,0,0,0.5)] border border-white/10 overflow-hidden min-w-[280px] p-2 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-white/5">
       <div className="text-[10px] font-bold text-white/40 px-3 py-1.5 uppercase tracking-widest mb-1 select-none flex items-center justify-between">
-        <span>AI & 基础指令</span>
+        <span>AI & 法律条款</span>
         <span className="text-[9px] bg-white/10 px-1.5 py-0.5 rounded text-white/50">TAB 切换</span>
       </div>
       
@@ -144,7 +166,8 @@ const CommandList = forwardRef((props: any, ref) => {
 CommandList.displayName = 'CommandList'
 
 const getSuggestionItems = ({ query }: { query: string }) => {
-  return [
+  // 1. 基础命令
+  const basicCommands = [
     {
       title: 'AI 智能续写',
       desc: '基于上下文自动生成后续内容',
@@ -156,14 +179,26 @@ const getSuggestionItems = ({ query }: { query: string }) => {
         }
       },
     },
-    { title: '一级标题', desc: '主要章节标题', icon: <Heading1 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 1 }).run() },
-    { title: '二级标题', desc: '次级章节标题', icon: <Heading2 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 2 }).run() },
-    { title: '三级标题', desc: '小节标题', icon: <Heading3 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 3 }).run() },
-    { title: '引用块', desc: '强调或引用法律条文', icon: <Quote className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleBlockquote().run() },
+    { title: '一级标题', desc: '大标题', icon: <Heading1 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 1 }).run() },
+    { title: '二级标题', desc: '中标题', icon: <Heading2 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 2 }).run() },
+    { title: '三级标题', desc: '小标题', icon: <Heading3 className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setNode('heading', { level: 3 }).run() },
+    { title: '引用块', desc: '引用重点内容', icon: <Quote className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleBlockquote().run() },
     { title: '无序列表', desc: '圆点项目符号', icon: <List className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleBulletList().run() },
     { title: '有序列表', desc: '数字编号列表', icon: <ListOrdered className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).toggleOrderedList().run() },
     { title: '分割线', desc: '视觉分隔符', icon: <Minus className="w-4 h-4" />, command: ({ editor, range }: any) => editor.chain().focus().deleteRange(range).setHorizontalRule().run() },
-  ].filter(item => item.title.toLowerCase().startsWith(query.toLowerCase()))
+  ]
+
+  // 2. ✨ P6: 智能条款命令
+  const clauseCommands = STANDARD_CLAUSES.map(clause => ({
+    title: clause.title,
+    desc: clause.desc,
+    icon: <BookTemplate className="w-4 h-4" />, 
+    command: ({ editor, range }: any) => {
+      editor.chain().focus().deleteRange(range).insertContent(clause.content).run()
+    }
+  }))
+
+  return [...basicCommands, ...clauseCommands].filter(item => item.title.toLowerCase().includes(query.toLowerCase()))
 }
 
 const renderSuggestion = () => {
@@ -384,7 +419,7 @@ export default function Editor({ content, onChange, onStatsChange, className }: 
   const [showResult, setShowResult] = useState(false)
   const [wordCount, setWordCount] = useState(0)
   
-  // ✨ P3 新增: 红黑文对比状态
+  // ✨ P3: 红黑文对比状态
   const [diffHtml, setDiffHtml] = useState('')
   const [originalText, setOriginalText] = useState('')
   
@@ -637,6 +672,10 @@ export default function Editor({ content, onChange, onStatsChange, className }: 
         /* AI 光标占位符样式 */
         .ai-cursor { display: inline-block; width: 2px; height: 1em; background-color: #6366f1; animation: blink 1s step-end infinite; }
         @keyframes blink { 50% { opacity: 0; } }
+        /* 气泡菜单滚动条 */
+        ::-webkit-scrollbar { width: 4px; } 
+        ::-webkit-scrollbar-track { background: transparent; } 
+        ::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
       `}</style>
     </div>
   )
