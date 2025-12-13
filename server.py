@@ -57,7 +57,7 @@ class AnalyzeRequest(BaseModel):
     messages: List[ChatMessage]
     current_doc: str = ""
     selection: Optional[str] = "" 
-    mode: str = "draft" # draft | polish | selection_polish | risk_score
+    mode: str = "draft" # draft | polish | selection_polish | risk_score | chat_doc
     user_id: Optional[str] = None 
 
 class DocumentSave(BaseModel):
@@ -196,7 +196,7 @@ async def analyze(request: AnalyzeRequest):
             prompt = f"""
             你是一名资深法律风控专家。请阅读以下文书，从四个维度进行评分（0-100）。
             【待审文书】{request.current_doc[:3000]}
-            【输出要求】仅输出标准 JSON：
+            【输出要求】仅输出标准 JSON，不要包含 Markdown 格式或其他文字：
             {{
                 "total_score": 85,
                 "summary": "一句话简评（例如：整体合规，但违约责任对甲方不利）",
@@ -223,9 +223,9 @@ async def analyze(request: AnalyzeRequest):
     last_user_msg = request.selection if request.mode == "selection_polish" else request.messages[-1].content
     user_id = request.user_id
     
-    # 1. RAG 检索
+    # 1. RAG 检索 (文档对话模式下不检索外部)
     rag_context = ""
-    if request.mode != "selection_polish":
+    if request.mode != "selection_polish" and request.mode != "chat_doc":
         rag_context = get_relevant_laws_formatted(last_user_msg)
 
     # 2. 记忆检索
@@ -263,6 +263,14 @@ async def analyze(request: AnalyzeRequest):
         【结构】
         1. **审查意见** (<blockquote>): 风险点、修改依据。
         2. **修订全文**：用 <b>加粗</b> 标注修改。
+        """
+    elif request.mode == "chat_doc": # ✨ P4: 与文档对话
+        system_instruction = f"""
+        {base_role}
+        【任务】根据当前文档内容回答问题。
+        【文档内容】'''{request.current_doc[:10000]}'''
+        【用户问题】"{last_user_msg}"
+        【要求】答案必须基于文档内容，如果文档没提到则说不知道。引用原文时加粗。
         """
     else: # selection_polish
         system_instruction = f"""
