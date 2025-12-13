@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase' 
 import { User } from '@supabase/supabase-js' 
@@ -11,7 +11,7 @@ import {
   ArrowUp, BookOpen, LayoutDashboard, Settings, 
   User as UserIcon, BrainCircuit, ChevronLeft,
   CheckCircle2, Loader2, Share2, AlertCircle, X, Lock, Palette, UploadCloud, Activity,
-  FileText, Maximize2, Minimize2 // ✨ P7: 专注模式图标
+  FileText, Maximize2, Minimize2, GripVertical // ✨ P8: 拖拽图标
 } from 'lucide-react'
 
 import { exportToWord } from '@/lib/export'
@@ -145,6 +145,11 @@ function MainContent() {
   // ✨ P7: 专注模式开关
   const [isFocusMode, setIsFocusMode] = useState(false)
 
+  // ✨ P8: 可调节宽度相关状态
+  const [sidebarWidth, setSidebarWidth] = useState(360)
+  const [isResizing, setIsResizing] = useState(false)
+  const sidebarRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => setUser(user))
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setUser(session?.user ?? null))
@@ -162,6 +167,29 @@ function MainContent() {
       if (showHistory && user) fetchHistory() 
       else if (showHistory && !user) setHistoryList([])
   }, [showHistory, user])
+
+  // ✨ P8: 拖拽逻辑
+  const startResizing = useCallback(() => setIsResizing(true), [])
+  const stopResizing = useCallback(() => setIsResizing(false), [])
+  const resize = useCallback((mouseMoveEvent: MouseEvent) => {
+      if (isResizing) {
+          // 60是左侧图标栏的宽度，需要减去
+          const newWidth = mouseMoveEvent.clientX - 60 
+          // 限制最小260px，最大600px
+          if (newWidth > 260 && newWidth < 600) {
+              setSidebarWidth(newWidth)
+          }
+      }
+  }, [isResizing])
+
+  useEffect(() => {
+      window.addEventListener("mousemove", resize)
+      window.addEventListener("mouseup", stopResizing)
+      return () => {
+          window.removeEventListener("mousemove", resize)
+          window.removeEventListener("mouseup", stopResizing)
+      }
+  }, [resize, stopResizing])
 
   const showToast = (msg: string, type: 'success' | 'info' | 'error' = 'info') => {
     setNotification({ msg, type })
@@ -356,7 +384,7 @@ function MainContent() {
   }
 
   return (
-    <div className="flex h-screen w-full bg-[#FAFAFA] text-slate-900 font-sans overflow-hidden">
+    <div className="flex h-screen w-full bg-[#FAFAFA] text-slate-900 font-sans overflow-hidden select-none">
       
       {/* 1. 侧边栏 (P7: 专注模式下隐藏) */}
       <aside className={cn(
@@ -390,11 +418,16 @@ function MainContent() {
         </div>
       </aside>
 
-      {/* 2. AI 面板 (P7: 专注模式下隐藏) */}
-      <div className={cn(
-          "flex flex-col bg-white border-r border-slate-200 z-30 shadow-[4px_0_24px_rgba(0,0,0,0.02)] relative transition-all duration-500 ease-in-out overflow-hidden",
-          isFocusMode ? "w-0 opacity-0" : "w-[360px] opacity-100"
-      )}>
+      {/* 2. AI 面板 (P7: 专注模式下隐藏, P8: 可拖拽调节宽度) */}
+      <motion.div 
+          ref={sidebarRef}
+          className={cn(
+              "flex flex-col bg-white border-r border-slate-200 z-30 shadow-[4px_0_24px_rgba(0,0,0,0.02)] relative transition-all duration-500 ease-in-out overflow-hidden",
+              isFocusMode ? "w-0 opacity-0" : "opacity-100"
+          )}
+          // 如果不是专注模式，使用动态宽度；否则宽度为0
+          style={{ width: isFocusMode ? 0 : sidebarWidth }}
+      >
          <AnimatePresence>
             {notification && (
                 <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="absolute top-4 inset-x-0 p-2 z-50 pointer-events-none flex justify-center">
@@ -422,7 +455,7 @@ function MainContent() {
          </div>
 
          {/* Chat Area */}
-         <div className="flex-1 overflow-y-auto p-5 bg-[#FAFAFA] scroll-smooth relative">
+         <div className="flex-1 overflow-y-auto p-5 bg-[#FAFAFA] scroll-smooth relative select-text">
             {riskData && (<RiskRadar data={riskData.dimensions} score={riskData.total_score} summary={riskData.summary} />)}
             
             {messages.length === 0 && !riskData && (
@@ -477,7 +510,21 @@ function MainContent() {
                 <Button size="icon" onClick={handleSend} disabled={!input.trim() || isAnalyzing} className="absolute right-2 bottom-2 h-8 w-8 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white shadow-md disabled:opacity-50 disabled:grayscale transition-all"><ArrowUp className="w-4 h-4" /></Button>
             </div>
          </div>
-      </div>
+      </motion.div>
+
+      {/* ✨ P8: 拖拽控制杆 (Resizer Handle) */}
+      {!isFocusMode && (
+          <div 
+            className={cn(
+                "w-1 h-full cursor-col-resize hover:bg-indigo-500 active:bg-indigo-600 transition-colors z-50 flex flex-col justify-center items-center group",
+                isResizing && "bg-indigo-600 w-1.5" // 拖拽时变宽变色
+            )}
+            onMouseDown={startResizing}
+          >
+             {/* 视觉提示小把手 */}
+             <div className="h-8 w-1 rounded-full bg-slate-300 group-hover:bg-white transition-colors" />
+          </div>
+      )}
 
       {/* 3. Editor Area */}
       <main className="flex-1 flex flex-col h-full relative overflow-hidden bg-[#F2F4F7]">
